@@ -1,0 +1,25 @@
+{
+  // Browser-half program (Web GUI side). SDK types resolve from the
+  // @deepseek-ai/* npm packages declared in devDependencies, never from a
+  // source checkout.
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "types": []
+  },
+  "include": ["src/client/**/*", "src/css-modules.d.ts"]
+}
