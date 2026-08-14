@@ -2,6 +2,8 @@
 
 [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
+English | [中文](README.zh.md)
+
 DeepSeek Open Platform balance and current-session spend estimate — a permanent
 Host + Web Client composition plugin for [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)
 (`dsh`), installable via `dsh plugin add`.

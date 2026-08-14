@@ -2,6 +2,8 @@
 
 [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
+[English](README.md) | 中文
+
 DeepSeek 开放平台余额与当前会话消耗估算——[deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）的
 常驻组合插件（Host + Web Client 双半），可通过 `dsh plugin add` 安装。
 
