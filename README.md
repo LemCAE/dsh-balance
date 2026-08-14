@@ -1,12 +1,10 @@
 # dsh-balance
 
-[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
-
 English | [中文](README.zh.md)
 
-DeepSeek Open Platform balance and current-session spend estimate — a permanent
-Host + Web Client composition plugin for [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)
-(`dsh`), installable via `dsh plugin add`.
+A Host + Web Client composition plugin for [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)
+(`dsh`): queries the DeepSeek Open Platform account balance and estimates the
+current session's spend. Installable via `dsh plugin add`.
 
 ## Features
 
@@ -21,9 +19,9 @@ Host + Web Client composition plugin for [deepseek-harness](https://github.com/d
 - **Top-bar chip** (session header): `余额 ¥x | 会话 ≈¥y`, click to refresh;
   hover (500 ms) shows a detail tooltip **below the button**, horizontally
   centered and viewport-clamped.
-- **Settings page** (设置 → DeepSeek 余额): balance, refresh-interval selector,
-  and an editable price table (old / off-peak / peak per model). Changes
-  persist in the settings document.
+- **Settings page** (设置 → DeepSeek 余额): balance rows, refresh-interval
+  selector, and an editable price table (old / off-peak / peak per model).
+  Changes persist in the settings document across restarts.
 - **Model tool**: `deepseek_balance` returns balance + the calling session's
   estimated spend.
 - **Idle-aware refresh**: after 2 refresh cycles without session activity the
@@ -33,25 +31,30 @@ Host + Web Client composition plugin for [deepseek-harness](https://github.com/d
 
 ## Installation
 
+Standard (bundle install, recommended):
+
 ```sh
 dsh plugin --profile web add @lemcae/dsh-balance
 ```
 
-Restart `dsh web` (or refresh the page once the host module is up), then open
-a session: the balance chip appears in the session header, and 设置 →
-DeepSeek 余额 shows the full card.
+The installer adds the package to the web profile's dependencies and bundle
+list; after restarting `dsh web`, the loader applies the in-package
+`cordis.patch.yml` automatically. Verify:
 
-Manual install (same mechanism, no market involved): add the bundle row to the
-web profile patch (`$DSH_HOME/profiles/web/cordis.patch.yml`):
+- Open any session → the `余额 ¥x | 会话 ≈¥y` chip appears in the header with
+  a hover detail tooltip;
+- 设置 → DeepSeek 余额 shows the full card (balance, interval, price table);
+- Ask the model to call the `deepseek_balance` tool.
 
-```yaml
-- insert:
-    - id: dsh-balance
-      name: '@lemcae/dsh-balance'
-```
+Manual install (same mechanism, bypassing the installer): edit
+`$DSH_HOME/profiles/web/package.json` — add `"@lemcae/dsh-balance": "<latest
+version>"` (as on npm) to `dependencies` and `"@lemcae/dsh-balance"` to the
+`dsh.profile.bundles` array — then run `pnpm install` in that directory and
+restart.
 
-Peer dependencies are the official `@deepseek-ai/*` packages (^0.1.0-rc.6
-line, `@deepseek-ai/cordis` ^4.0.1) plus `react`.
+Peer dependencies are the official `@deepseek-ai/*` packages (`^0.1.0-rc.5`
+line, covering rc.5 and rc.6; `@deepseek-ai/cordis` ^4.0.1) plus `react`,
+provided by the host.
 
 ## Usage
 
@@ -73,7 +76,8 @@ Settings namespace `dsh-balance`:
 | `prices` | see source | `{ switchover, models: { deepseek-v4-flash, deepseek-v4-pro, default } }`, each model `{ old, offPeak, peak }` rates in CNY per 1M tokens |
 
 `switchover` default `2026-08-16T16:00:00Z` (2026-08-17 00:00 Beijing); before
-it the `old` rates apply, after it peak/off-peak by Beijing hour.
+it the `old` rates apply, after it peak/off-peak by Beijing hour (peak
+9:00–12:00 and 14:00–18:00).
 
 ## Known Limitations and Deferred Work
 
@@ -132,6 +136,9 @@ GitHub secrets. One-time setup: register the npm user `lemcae`, publish
 public --no-git-checks`), then allow `LemCAE/dsh-balance` (workflow
 `release.yml`) as a trusted publisher on the package's npm settings page.
 
-Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to this
-repository so the community can discover it, and submit a one-line entry to
-[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).
+Community listing (optional, once the plugin is stable): the repository
+already carries the [`dsh-plugin`](https://github.com/topics/dsh-plugin)
+topic; submit a one-line entry to
+[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
+(README.md and README.zh.md together), then add the Awesome badge to this
+README once listed.

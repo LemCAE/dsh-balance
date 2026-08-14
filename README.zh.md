@@ -1,11 +1,9 @@
 # dsh-balance（DeepSeek 余额查询）
 
-[![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
-
 [English](README.md) | 中文
 
-DeepSeek 开放平台余额与当前会话消耗估算——[deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）的
-常驻组合插件（Host + Web Client 双半），可通过 `dsh plugin add` 安装。
+[deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）的组合插件（Host + Web Client 双半）：
+查询 DeepSeek 开放平台账户余额，并估算当前会话的消耗金额。通过 `dsh plugin add` 安装。
 
 ## 功能
 
@@ -16,31 +14,34 @@ DeepSeek 开放平台余额与当前会话消耗估算——[deepseek-harness](h
   按官方价目表逐步骤计价（2026-08-16 23:59 北京时间前为旧固定价；之后按峰谷价，
   高峰 9-12 / 14-18 北京时间）。**仅为估算，以官方账单为准。**
 - **顶栏徽章**（会话头部）：`余额 ¥x | 会话 ≈¥y`，点击刷新；悬停 500ms 显示明细气泡
-  （**按钮正下方**、水平居中、视口边缘自动夹紧）。
-- **设置页**（设置 → DeepSeek 余额）：余额、自动刷新间隔下拉、可编辑价目表
-  （旧价 / 空闲 / 高峰 × 模型）。改动持久化于设置文档。
+  （按钮正下方、水平居中、视口边缘自动夹紧）。
+- **设置页**（设置 → DeepSeek 余额）：余额明细、自动刷新间隔下拉、可编辑价目表
+  （旧价 / 空闲 / 高峰 × 模型）。改动持久化于设置文档，重启不丢。
 - **模型工具**：`deepseek_balance`——余额 + 调用方会话的预估消耗。
 - **空闲降频**：连续 2 个刷新周期无会话活动后，自动刷新降为 5 分钟，有活动即恢复。
 - **完全自包含**：部署无需修改宿主仓库任何代码（通信走内置 `commands` Remote 命名空间）。
 
 ## 安装
 
+标准方式（bundle 安装，推荐）：
+
 ```sh
 dsh plugin --profile web add @lemcae/dsh-balance
 ```
 
-重启 `dsh web`（host 模块就绪后刷新页面即可），打开任意会话：顶栏出现余额徽章，
-设置 → DeepSeek 余额 显示完整卡片。
+安装器把包加入 web profile 的依赖与 bundle 列表；重启 `dsh web` 后，loader 自动应用包内
+`cordis.patch.yml` 完成插件挂载。验证：
 
-手动安装（同一机制，不经过市场）：在 web profile patch（`$DSH_HOME/profiles/web/cordis.patch.yml`）加行：
+- 打开任意会话 → 顶栏出现 `余额 ¥x | 会话 ≈¥y` 徽章，悬停显示明细；
+- 设置 → DeepSeek 余额 → 完整卡片（余额、间隔、价目表）；
+- 让模型调用 `deepseek_balance` 工具。
 
-```yaml
-- insert:
-    - id: dsh-balance
-      name: '@lemcae/dsh-balance'
-```
+手动安装（同一机制，不经过插件安装器）：编辑 `$DSH_HOME/profiles/web/package.json`，
+在 `dependencies` 加 `"@lemcae/dsh-balance": "<最新版本>"`（以 npm 为准），在 `dsh.profile.bundles`
+数组加 `"@lemcae/dsh-balance"`，然后在该目录执行 `pnpm install` 并重启。
 
-Peer 依赖为官方 `@deepseek-ai/*` 包（^0.1.0-rc.6 线，`@deepseek-ai/cordis` ^4.0.1）与 `react`。
+Peer 依赖为官方 `@deepseek-ai/*` 包（`^0.1.0-rc.5` 线，兼容 rc.5 与 rc.6；`@deepseek-ai/cordis` ^4.0.1）
+与 `react`，由宿主提供。
 
 ## 使用
 
@@ -59,7 +60,7 @@ settings 命名空间 `dsh-balance`：
 | `prices` | 见源码 | `{ switchover, models: { deepseek-v4-flash, deepseek-v4-pro, default } }`，每模型 `{ old, offPeak, peak }`，单位：元 / 百万 tokens |
 
 `switchover` 默认 `2026-08-16T16:00:00Z`（北京时间 2026-08-17 00:00）；此前用 `old` 价，
-之后按北京时间的峰谷价。
+之后按北京时间的峰谷价（高峰 9-12、14-18）。
 
 ## Known Limitations and Deferred Work
 
@@ -107,6 +108,6 @@ settings 命名空间 `dsh-balance`：
 `pnpm publish --access public --no-git-checks`）；然后在 npm 包设置页把
 `LemCAE/dsh-balance`（workflow `release.yml`）添加为可信发布者。
 
-请为本仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic 以便社区发现，
-并向 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
-提交一行条目。
+生态收录（可选，功能稳定后再做）：仓库已打 [`dsh-plugin`](https://github.com/topics/dsh-plugin)
+topic；向 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 提交
+一行条目（README.md 与 README.zh.md 同步），收录后即可在 README 加 Awesome 徽章。

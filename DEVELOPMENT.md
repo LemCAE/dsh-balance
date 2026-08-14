@@ -19,10 +19,11 @@
 
 ```
 dsh-balance/（独立仓库根）
-  package.json        # 双半包元数据；dsh.bundle + dsh.client 声明；peer 依赖
+  package.json        # 双半包元数据；dsh.bundle + dsh.client 声明；peer 依赖（^0.1.0-rc.5 线）
+  .npmrc              # 锁定官方 registry（用户级 .npmrc 是 npmmirror 镜像，发布/登录必须走官方）
   tsconfig.json       # solution：tsconfig.host.json + tsconfig.client.json
   tsdown.config.ts    # clientBundle preset（shared/）：node 半 + 浏览器 bundle
-  cordis.patch.yml    # dsh.bundle.patch：web profile 的 insert 行
+  cordis.patch.yml    # dsh.bundle.patch：web profile 的 insert 行（loader 自动应用）
   shared/             # clientBundle 预设 + 平台模块表（自主库复制，勿动）
   src/index.ts        # Host 半
   src/client/index.ts # Client 半
@@ -32,7 +33,7 @@ dsh-balance/（独立仓库根）
 ```
 
 ```powershell
-cd D:\dsh-balance
+cd D:\Project\dsh-balance
 pnpm install                     # 首次：从 npm 拉 peer/dev 依赖
 pnpm typecheck                   # tsc -b（lib/types）
 pnpm build                       # tsc -b + tsdown（lib/index.js + lib/client.js + lib/invariant.js）
@@ -145,32 +146,33 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
 
 ## 6. 部署接线（安装方式）
 
-1. **推荐：`dsh plugin` 安装**（走 npm 或 GitHub）：
+1. **标准方式：`dsh plugin` 安装**（从 npm 拉包）：
    ```sh
    dsh plugin --profile web add @lemcae/dsh-balance
    ```
-   包内 `cordis.patch.yml` 即 `dsh.bundle.patch` 指向的 patch 层；插件安装器负责行注入与模块链接。
-2. **手动安装**（同一机制）：在 `$DSH_HOME/profiles/web/cordis.patch.yml` 加行：
-   ```yaml
-   - insert:
-       - id: dsh-balance
-         name: '@lemcae/dsh-balance'
-   ```
-   （**必须是 `insert` 形式**；`- id: …` 裸行是按 id 覆盖，新 id 报 `entry not found` 被静默跳过。）
-   并确保 `@lemcae/dsh-balance` 可从 `$DSH_HOME/profiles/node_modules` 解析（安装器/链接负责；本地开发可建 junction → 本仓库）。
-3. **重启**：重启 `dsh web` 进程。patch 行本身可热重载，但**包代码改动**（host 模块）需重启进程；client bundle 刷新页面即生效。
+   安装器把包加入 `$DSH_HOME/profiles/web/package.json` 的 `dependencies` 与
+   `dsh.profile.bundles` 列表（包实体落在 `profiles/web/node_modules/@lemcae/dsh-balance`）；
+   **重启 `dsh web` 后 loader 自动应用包内 `cordis.patch.yml`**（`dsh.bundle.patch` 机制），
+   无需手写 profile patch 行。
+2. **手动安装**（同一机制，绕过安装器）：编辑 `$DSH_HOME/profiles/web/package.json`——
+   `dependencies` 加 `"@lemcae/dsh-balance": "^0.1.3"`，`dsh.profile.bundles` 数组加
+   `"@lemcae/dsh-balance"`——然后在该目录 `pnpm install` 并重启。
+3. **升级**：`pnpm dsh plugin --profile web update @lemcae/dsh-balance`（或改依赖范围后重装）。
+4. **重启**：重启 `dsh web` 进程。patch 行/新包本身可热重载，但**包代码改动**（host 模块）
+   需重启进程；client bundle 刷新页面即生效。
 
 ## 7. 验证清单
 
 ```powershell
-cd D:\dsh-balance
+cd D:\Project\dsh-balance
 pnpm typecheck && pnpm build                  # 构建门禁
 pnpm pack --dry-run                           # 检查 tarball 内容（lib + src + cordis.patch.yml + README）
-# 运行态（安装并重启 dsh web 后）
+# 安装后（dsh web 重启）：
 # 页面：顶栏徽章、悬停气泡（按钮下方）、设置页卡片、间隔/价格编辑生效且刷新后保留
 ```
 - 本会话 `Tool.listTools` 应含 `deepseek_balance`；调用返回余额 + 消耗 + `nextRefreshMs`。
-- 开发期本机部署：`dsh plugin --profile web add link:<本仓库路径>`（GitHub 链接形式）或手动 patch + junction。
+- 安装检查：`$DSH_HOME/profiles/web/package.json` 的 `dependencies` 与 `dsh.profile.bundles`
+  含 `@lemcae/dsh-balance`；`profiles/web/node_modules/@lemcae/dsh-balance` 存在。
 
 ## 8. 故障排查速查表（本插件历史问题）
 
@@ -189,6 +191,6 @@ pnpm pack --dry-run                           # 检查 tarball 内容（lib + sr
 ## 9. 发布要点
 
 - **发布开关 = 推送 `vX.Y.Z` tag**：`.github/workflows/release.yml` 校验 tag == `package.json` 版本（`scripts/verify-version.mjs`）→ typecheck → build → `pnpm publish --access public --tag latest` → `gh release create`。**认证走 npm Trusted Publishing（OIDC，`id-token: write`）**，无需 NPM_TOKEN secret；一次性前置：npm 注册用户 `lemcae` → 本机手动首发 `0.1.0`（`npm login` + `pnpm publish`）→ npm 包设置页把 `LemCAE/dsh-balance`（workflow `release.yml`）添加为可信发布者。
-- peer 依赖由消费者（dsh 宿主）自行提供（`@deepseek-ai/*` 系列 + `react`）；peer 范围写真实版本（`^0.1.0-rc.6`），不写 `workspace:`。
+- peer 依赖由消费者（dsh 宿主）自行提供（`@deepseek-ai/*` 系列 + `react`）；peer 范围写真实版本（`^0.1.0-rc.5`，兼容 rc.5 与 rc.6 宿主），不写 `workspace:`。
 - 生态收录：仓库打 `dsh-plugin` topic；向 awesome-dsh-plugin 提交一行条目（README.md + README.zh.md 同步），其站点每日生成 plugins.json 供 dsh-market 白名单使用。
 - 已知代价：每次自动刷新都会写入 `command/run` + `command/done` 两条会话日志事件（空闲降频后大幅减少）。

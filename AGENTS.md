@@ -20,7 +20,7 @@
 ## 构建与生效
 
 ```powershell
-cd D:\dsh-balance
+cd D:\Project\dsh-balance
 pnpm install            # 首次：从 npm 拉 peer/dev 依赖
 pnpm typecheck          # tsc -b（lib/types）
 pnpm build              # tsc -b + tsdown（lib/index.js + lib/client.js + lib/invariant.js）
@@ -36,15 +36,18 @@ pnpm build              # tsc -b + tsdown（lib/index.js + lib/client.js + lib/i
 3. **增量读取**：消耗折叠用 `sessionPersistence.readFrom(id, fromSeq)`（`sessionQuery` 没有 readFrom，只有轻量 `listEvents` 与全量 `readSession`）。
 4. **命令需要真实会话 ID**：`commands.execute('', ...)` 无效（解析不到 agent）——设置页卡片经 `useSessions(state => state.current)` 取当前会话。
 5. **patch 插入方言**：profile patch 加新行必须用 `- insert:\n    - id: ...` 形式；裸 `- id:` 是按 id 覆盖，新 id 会报 `entry not found` 被跳过（包内 `cordis.patch.yml` 即此形式）。
-6. **模块解析**：loader 从 `$DSH_HOME/profiles/node_modules` 解析 profile 行；`dsh plugin add` 负责链接，手动安装时需自行建链接（junction → 本仓库）。
+6. **模块解析**：`dsh plugin add` 把包装入 `$DSH_HOME/profiles/web/node_modules` 并登记
+   `dsh.profile.bundles`；loader 启动时自动应用包内 `cordis.patch.yml`（`dsh.bundle.patch`）。
+   手动安装 = 编辑 `profiles/web/package.json`（dependencies + bundles）后 `pnpm install`。
+   旧式 `profiles/node_modules` junction 仅用于早期部署，勿回退。
 7. `exactOptionalPropertyTypes` 开启：不要显式传 `prop: undefined`。
 8. 生成 Remote 返回 `{ ok, value }` 信封，需解包后再取 `result.text`。
 
 ## 验证清单
 
 - `pnpm typecheck && pnpm build`；`pnpm pack --dry-run` 检查 tarball（lib + src + cordis.patch.yml + README）
-- 发布：推 `vX.Y.Z` tag → workflow 校验版本、构建、`pnpm publish --tag latest`、GitHub Release（需 `NPM_TOKEN` secret）
-- 生态：仓库打 `dsh-plugin` topic；提交一行到 awesome-dsh-plugin（README.md + README.zh.md）
+- 发布：推 `vX.Y.Z` tag → workflow 校验版本、构建、`pnpm publish --tag latest --provenance`、GitHub Release（**Trusted Publishing/OIDC，无需 NPM_TOKEN**；仓库 `repository.url` 必须精确等于 `https://github.com/LemCAE/dsh-balance` 才能通过 sigstore 校验）
+- 生态：仓库已打 `dsh-plugin` topic；awesome-dsh-plugin 收录待功能稳定后再提交（README.md + README.zh.md 同步）
 - 运行态：顶栏徽章（余额 | 会话 ≈x）、悬停气泡（按钮下方居中）、设置 → DeepSeek 余额；`Tool.listTools` 含 `deepseek_balance`，调用返回余额 + 消耗 + `nextRefreshMs`
 
 详见 `DEVELOPMENT.md`。
