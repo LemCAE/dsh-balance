@@ -49,8 +49,8 @@ pnpm build              # tsc -b + tsdown（lib/index.js + lib/client.js + lib/i
 ## 当前状态与待办（2026-08-14）
 
 - **已发布**：npm 0.1.0（手动首发）/ 0.1.2 / 0.1.3（CI + provenance）；GitHub Release v0.1.2、v0.1.3；Trusted Publishing 已配置（无 NPM_TOKEN）
-- **已安装**：本机 web profile 经 `dsh plugin add` 登记 bundle（`profiles/web/package.json` 的 dependencies + `dsh.profile.bundles`）
-- **待办**：重启 `dsh web` 验证运行态（顶栏徽章/设置卡片/`deepseek_balance` 工具）；重启后删除被占用句柄的旧目录 `D:\deepseek-harness\packages\extensions\dsh-balance`；功能迭代稳定后再提交 awesome-dsh-plugin 收录并补 README 徽章
+- **已安装并验证**：本机 web profile 经 `dsh plugin add` 登记 bundle（`profiles/web/package.json` 的 dependencies + `dsh.profile.bundles`）；重启 `dsh web` 后运行态验证通过（`deepseek_balance` 工具实测返回余额 CNY 6.78 + 会话消耗 ≈¥1.19；顶栏徽章/设置卡片可见）；旧开发目录已删除，主库工作区已清理
+- **待办**：功能迭代稳定后提交 awesome-dsh-plugin 收录（README.md + README.zh.md 同步）并补 README 徽章
 
 ## 验证清单
 

@@ -17,7 +17,8 @@
 
 **发布状态（2026-08-14）**：`@lemcae/dsh-balance` 已发布至 npm（0.1.0 手动首发 / 0.1.2、0.1.3 由 CI 发布并带
 sigstore provenance），发布认证走 npm Trusted Publishing（OIDC），无需 NPM_TOKEN。本机 web profile 已通过
-`dsh plugin add` 完成 bundle 安装，待重启 `dsh web` 验证运行态。
+`dsh plugin add` 完成 bundle 安装并**重启验证通过**（`deepseek_balance` 工具实测返回余额 CNY 6.78 与
+本会话消耗 ≈¥1.19；顶栏徽章与设置卡片可见）；主库开发目录已删除，工作区已清理。
 
 ## 2. 目录与构建
 
