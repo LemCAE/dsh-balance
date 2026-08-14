@@ -122,6 +122,14 @@ varies per call, which does not invalidate prefix reuse.
 Pushing a `vX.Y.Z` tag is the release switch: the [release workflow](.github/workflows/release.yml)
 verifies the tag matches `package.json` version, typechecks, builds, publishes
 `@lemcae/dsh-balance` to npm (`latest` dist-tag), and creates the GitHub
-Release. Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to
-this repository so the community can discover it, and submit a one-line entry
-to [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).
+Release.
+
+Publishing uses **npm Trusted Publishing** (OIDC) — no long-lived npm token in
+GitHub secrets. One-time setup: register the npm user `lemcae`, publish
+`0.1.0` once from a local machine (`npm login` then `pnpm publish --access
+public --no-git-checks`), then allow `LemCAE/dsh-balance` (workflow
+`release.yml`) as a trusted publisher on the package's npm settings page.
+
+Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to this
+repository so the community can discover it, and submit a one-line entry to
+[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).

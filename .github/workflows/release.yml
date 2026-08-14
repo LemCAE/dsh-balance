@@ -5,7 +5,13 @@ name: Release
 # (the tag is the version source of truth), runs the full gate, publishes to
 # npm, and creates the GitHub Release.
 #
-# Requires the repository secret NPM_TOKEN (npm automation token) to publish.
+# Authentication uses npm Trusted Publishing (OIDC) — no NPM_TOKEN secret.
+# One-time prerequisites:
+#   1. npm account "lemcae" (owns the @lemcae scope).
+#   2. Publish 0.1.0 once from a local machine (`npm login` then
+#      `pnpm publish --access public --no-git-checks`) so the package exists.
+#   3. On npmjs.com → package settings → Trusted Publisher, allow GitHub
+#      LemCAE/dsh-balance with workflow file release.yml.
 
 on:
   push:
@@ -14,6 +20,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # Required for npm trusted publishing (OIDC)
 
 concurrency:
   group: release-${{ github.ref }}
@@ -34,8 +41,9 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 11
+        # No explicit version: package.json's packageManager field is the
+        # single source of truth (pnpm@11.7.0); a fixed version here plus that
+        # field makes the action fail with ERR_PNPM_BAD_PM_VERSION.
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -59,12 +67,11 @@ jobs:
       - name: Verify package version matches the tag
         run: node scripts/verify-version.mjs "${{ steps.tag.outputs.version }}"
 
+      # The npm CLI auto-detects the GitHub Actions OIDC environment when the
+      # id-token permission is granted; provenance attestations are generated
+      # automatically. No tokens or secrets involved.
       - name: Publish to npm
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
-          pnpm publish --no-git-checks --access public --registry=https://registry.npmjs.org/ --tag latest
+        run: pnpm publish --no-git-checks --access public --registry=https://registry.npmjs.org/ --tag latest
 
       - name: Create GitHub Release
         env:

@@ -98,6 +98,13 @@ settings 命名空间 `dsh-balance`：
 
 推送 `vX.Y.Z` tag 即发布开关：[发布 workflow](.github/workflows/release.yml) 校验 tag 与
 `package.json` 版本一致、typecheck、构建、发布 `@lemcae/dsh-balance` 到 npm（`latest` dist-tag）
-并创建 GitHub Release。请为本仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin)
-topic 以便社区发现，并向 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
+并创建 GitHub Release。
+
+发布采用 **npm Trusted Publishing（OIDC）**——无需在 GitHub secrets 中长期存放 npm token。
+一次性配置：注册 npm 用户 `lemcae`；在本机先手动发布一次 `0.1.0`（`npm login` 后
+`pnpm publish --access public --no-git-checks`）；然后在 npm 包设置页把
+`LemCAE/dsh-balance`（workflow `release.yml`）添加为可信发布者。
+
+请为本仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic 以便社区发现，
+并向 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
 提交一行条目。
