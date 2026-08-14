@@ -68,10 +68,10 @@ jobs:
         run: node scripts/verify-version.mjs "${{ steps.tag.outputs.version }}"
 
       # The npm CLI auto-detects the GitHub Actions OIDC environment when the
-      # id-token permission is granted; provenance attestations are generated
-      # automatically. No tokens or secrets involved.
+      # id-token permission is granted; --provenance attaches SLSA provenance
+      # attestations. No tokens or secrets involved.
       - name: Publish to npm
-        run: pnpm publish --no-git-checks --access public --registry=https://registry.npmjs.org/ --tag latest
+        run: pnpm publish --no-git-checks --access public --registry=https://registry.npmjs.org/ --tag latest --provenance
 
       - name: Create GitHub Release
         env:
