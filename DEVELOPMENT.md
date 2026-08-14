@@ -15,6 +15,10 @@
 - **空闲降频**：连续 2 个刷新周期无会话活动 → 自动刷新从设置间隔降为 5 分钟。
 - **完全自包含**：不修改宿主仓库任何代码（`api-remotes` 白名单、事件声明均已还原），一个包 + 一个 `dsh.bundle` patch 即可部署。
 
+**发布状态（2026-08-14）**：`@lemcae/dsh-balance` 已发布至 npm（0.1.0 手动首发 / 0.1.2、0.1.3 由 CI 发布并带
+sigstore provenance），发布认证走 npm Trusted Publishing（OIDC），无需 NPM_TOKEN。本机 web profile 已通过
+`dsh plugin add` 完成 bundle 安装，待重启 `dsh web` 验证运行态。
+
 ## 2. 目录与构建
 
 ```
@@ -187,6 +191,12 @@ pnpm pack --dry-run                           # 检查 tarball 内容（lib + sr
 | 包解析不到 | 模块链接缺失（手动安装路径） | 用 `dsh plugin add` 或建 junction |
 | 气泡不显示 | 曾用 client timer 服务（不可靠） | 改浏览器 `setTimeout` |
 | 构建报 `exactOptionalPropertyTypes` | 显式传 `prop: undefined` | 条件构造 props |
+| CI `Setup pnpm` 报 `ERR_PNPM_BAD_PM_VERSION` | action-setup 的 `version` 与 package.json `packageManager` 同时指定 | workflow 删掉 `version` 参数，packageManager 为准 |
+| CI publish 报 `E422 Error verifying sigstore provenance bundle` | `repository.url` 与 OIDC 仓库标识不一致（写成了 `git+https://github.com/lemcae/dsh-balance.git`） | 必须精确写 `https://github.com/LemCAE/dsh-balance`（无 `git+`、无 `.git`、保留大小写） |
+| `npm login` 登录到镜像源 | 用户级 `.npmrc` 的 `registry=https://registry.npmmirror.com` | 项目级 `.npmrc` 锁定官方 `registry=https://registry.npmjs.org/`（发布/登录走官方，其他仓库仍可走镜像） |
+| `npm publish` 报无发布权限 | npm 用户名与 scope 不一致或未注册 | scope 必须与 npm 用户名精确一致（如 `@lemcae` ↔ 用户 `lemcae`）；先注册同名用户 |
+| 目录移动后 `pnpm typecheck` 报 `MODULE_NOT_FOUND` | node_modules 的 pnpm 链接指向旧路径，pnpm 误判"已是最新" | 删除 node_modules 后重新 `pnpm install` |
+| 删除旧目录报 exit 32 被占用 | 正在运行的 `dsh web` 进程持有目录句柄 | 先重启 web，再 `cmd /c rd /s /q` |
 
 ## 9. 发布要点
 
@@ -194,3 +204,63 @@ pnpm pack --dry-run                           # 检查 tarball 内容（lib + sr
 - peer 依赖由消费者（dsh 宿主）自行提供（`@deepseek-ai/*` 系列 + `react`）；peer 范围写真实版本（`^0.1.0-rc.5`，兼容 rc.5 与 rc.6 宿主），不写 `workspace:`。
 - 生态收录：仓库打 `dsh-plugin` topic；向 awesome-dsh-plugin 提交一行条目（README.md + README.zh.md 同步），其站点每日生成 plugins.json 供 dsh-market 白名单使用。
 - 已知代价：每次自动刷新都会写入 `command/run` + `command/done` 两条会话日志事件（空闲降频后大幅减少）。
+
+## 10. 发布实战记录（2026-08-14 首次发布）
+
+从主库 worktree 中的开发目录（`packages/extensions/dsh-balance`）迁移为独立插件仓库并完成首次发布，
+以下为完整流程与事实记录。
+
+### 10.1 发布流水线（已固化）
+
+```
+本地：改代码 → git commit → git push origin main
+      → pnpm version patch（0.1.x → 0.1.x+1，自动 commit + 打 tag v0.1.x）
+      → git push origin main && git push origin v0.1.x
+GitHub Actions（release.yml，v* tag 触发）：
+      actionlint → pnpm install --frozen-lockfile → typecheck → build
+      → verify-version.mjs（tag == package.json version）
+      → pnpm publish --no-git-checks --access public --tag latest --provenance（OIDC）
+      → gh release create
+宿主侧升级：pnpm dsh plugin --profile web update @lemcae/dsh-balance
+```
+
+### 10.2 版本发布记录
+
+| 版本 | 发布方式 | 结果 |
+| --- | --- | --- |
+| 0.1.0 | 本机手动 `pnpm publish` | 成功（无 provenance；同时是配置 Trusted Publisher 的前置——包必须存在才能配置） |
+| 0.1.1 | CI | 失败：sigstore provenance 校验 repository.url 不匹配（见 10.3-3）；registry 拒绝，未发布 |
+| 0.1.2 | CI | 成功：首次带 provenance 的 CI 发布 + GitHub Release |
+| 0.1.3 | CI | 成功：peer 范围放宽为 `^0.1.0-rc.5`（见 10.3-4） |
+
+### 10.3 关键坑与决策
+
+1. **pnpm 版本源**：`pnpm/action-setup` 同时给 `version` 且 package.json 有 `packageManager` 会报
+   `ERR_PNPM_BAD_PM_VERSION`。workflow 不写 `version`，以 `packageManager: pnpm@11.7.0` 为唯一来源。
+2. **官方 registry 锁定**：用户级 `.npmrc` 是 npmmirror 镜像（`npm login`/`publish` 会打到镜像的账号体系，
+   与官方 npm 用户不互通）。项目级 `.npmrc` 写 `registry=https://registry.npmjs.org/` 覆盖；
+   workflow 里也显式 `--registry`，双保险。镜像仅影响本仓库的依赖下载，其他仓库不受影响。
+3. **provenance 与 repository.url**：`--provenance` 时 sigstore 用 OIDC 仓库标识（`https://github.com/<Owner>/<repo>`）
+   与 package.json 的 `repository.url` 做**字符串精确匹配**。必须写
+   `https://github.com/LemCAE/dsh-balance`——`git+` 前缀、`.git` 后缀、大小写差异（lemcae）都会导致
+   `E422 Error verifying sigstore provenance bundle`。
+4. **peer 范围策略**：本插件只依赖 rc.5 就存在的 API（commands/tools/settings/sessionPersistence/slots/remote），
+   而官方主库 master 当时仍是 rc.5（npm 上的 rc.6 来自其他发布路径）。peer 写 `^0.1.0-rc.5`
+   （semver 同时覆盖 rc.5 与 rc.6 宿主），比生态常见的 `^0.1.0-rc.6` 更宽松；devDependencies 同样放宽
+   （npm 无 rc.5 时会解析到 rc.6 类型，向前兼容）。
+5. **Trusted Publishing 前置**：npm 的 Trusted Publisher 只能配置在已存在的包上，所以首个版本
+   （0.1.0）必须本机 `npm login` + `pnpm publish` 手动发布；之后在 npm 包设置页把
+   `LemCAE/dsh-balance`（workflow `release.yml`）加为可信发布者，CI 即可用 OIDC 发布（`id-token: write`），
+   不再需要 NPM_TOKEN secret。
+6. **`dsh plugin add` 的真实机制**：不是往 profile patch 写行，而是把包加入
+   `$DSH_HOME/profiles/web/package.json` 的 `dependencies` 与 `dsh.profile.bundles` 数组
+   （包实体在 `profiles/web/node_modules/@lemcae/dsh-balance`）；loader 启动时自动应用包内
+   `cordis.patch.yml`（`dsh.bundle.patch` 机制，见宿主 `packages/boot/app-boot/src/profile.ts`）。
+   旧式"手写 profile patch 行 + `profiles/node_modules` junction"是早期部署方式，已废弃。
+7. **宿主版本匹配**：插件 peer 需要宿主 ≥ rc.5；本地主库 worktree 若落后（如 rc.5 而生态已是 rc.6）
+   应先 `git pull` 主库更新，或按 10.3-4 放宽 peer。安装前先移除旧的手动安装
+   （profile patch 行 + junction），避免 `id: dsh-balance` 冲突。
+8. **遗留清理**：主库 worktree 里残留的 workspace 登记（`pnpm-lock.yaml` importer 条目）与
+   `node_modules/@deepseek-ai/dsh-balance` 死链不影响 dsh 启动（启动链只读 `$DSH_HOME/profiles/web`），
+   但建议 `git checkout -- pnpm-lock.yaml` + 删除死链保持主库干净；被运行中 web 进程占用的目录
+   需重启后删除。
