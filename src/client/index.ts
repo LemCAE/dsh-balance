@@ -7,11 +7,13 @@
  * DeepSeek 余额 page (breakdown, refresh-interval selector, editable official
  * price table).
  *
- * Transport: the Host pushes 'dsh-balance/result' and 'dsh-balance/config'
- * over the allowlisted remote event bridge on its own timer; the page only
- * subscribes and issues rare user-driven actions through the existing
+ * Transport: the page pulls all data through the existing
  * `ctx.remote.commands.execute` namespace ('/dsh-balance refresh | interval
- * <ms> | prices <json>').
+ * <ms> | prices <json>'). Each response carries nextRefreshMs; after 2
+ * consecutive refresh cycles without a new user/assistant message the Host
+ * marks the session idle, the page drops to the paused detection cadence, and
+ * the next detection call that sees a new conversation restores the active
+ * cadence automatically.
  */
 
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
@@ -62,6 +64,7 @@ interface ResultPayload {
   consumption?: unknown
   idle?: unknown
   nextRefreshMs?: unknown
+    language?: unknown
 }
 
 type ChipView =
@@ -69,18 +72,131 @@ type ChipView =
   | { kind: 'error'; message: string }
   | { kind: 'data'; result: ResultPayload }
 
+
+/** 与 Host 侧 PAUSED_REFRESH_MS 保持一致：暂停自动查询后的兜底探测间隔。 */
+const PAUSED_REFRESH_MS = 300000
 const INTERVAL_OPTIONS = [
-  { ms: 15000, label: '15 秒' },
-  { ms: 30000, label: '30 秒' },
-  { ms: 60000, label: '60 秒' },
-  { ms: 120000, label: '2 分钟' },
-  { ms: 300000, label: '5 分钟' },
+  { ms: 15000 },
+  { ms: 30000 },
+  { ms: 60000 },
+  { ms: 120000 },
+  { ms: 300000 },
 ]
 
 const PRICE_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro', 'default'] as const
 const PRICE_PHASES = ['old', 'offPeak', 'peak'] as const
 const PRICE_FIELDS = ['input', 'cacheHit', 'output'] as const
 
+
+type Lang = 'zh' | 'en'
+
+function resolveLang(language: unknown): Lang {
+  if (language === 'zh-CN') return 'zh'
+  if (language === 'en') return 'en'
+  if (typeof document !== 'undefined') {
+    const host = document.documentElement.lang || navigator.language || 'zh-CN'
+    return /^zh/i.test(host) ? 'zh' : 'en'
+  }
+  return 'zh'
+}
+
+const COPY: Record<Lang, Record<string, string>> = {
+  zh: {
+    settingsTitle: 'DeepSeek 开放平台余额',
+    available: '可用',
+    unavailable: '不可用',
+    noSession: '打开会话后自动显示余额',
+    loading: '查询中…',
+    noBalance: '暂无余额数据',
+    granted: '赠送',
+    toppedUp: '充值',
+    updatedAt: '更新于',
+    refresh: '刷新',
+    autoRefreshInterval: '自动刷新间隔',
+    language: '界面语言',
+    languageAuto: '跟随主界面',
+    languageZh: '中文',
+    languageEn: 'English',
+    priceTable: '价格表（元 / 百万 tokens）',
+    save: '保存',
+    oldPrice: '旧价',
+    offPeakPrice: '空闲时段',
+    peakPrice: '高峰时段',
+    inputLabel: '输入(未命中)',
+    cacheHitLabel: '缓存命中',
+    outputLabel: '输出',
+    defaultModelLabel: '默认（未列出的模型按此计价）',
+    switchoverHint: '08-17 00:00（北京时间）起使用「空闲/高峰」价；高峰时段 9-12、14-18。估算仅供参考，以官方账单为准。',
+    pausedTip: '已暂停自动查询：连续 2 个周期无新对话，出现新对话后自动恢复',
+    activeRefresh: '自动刷新每',
+    seconds: '秒',
+    clickRefresh: '点击刷新',
+    estimateNote: '按官方价目表估算，仅供参考',
+    retry: '点击重试',
+    balance: '余额',
+    sessionApprox: '会话 ≈',
+    balanceDash: '余额 —',
+    balanceLoading: '余额 …',
+    unknownCurrency: '未知币种',
+    sessionNoData: '会话消耗：暂无会话数据',
+    modelUnknown: '未知模型',
+    modelDefault: '默认（未列出的模型按此计价）',
+  },
+  en: {
+    settingsTitle: 'DeepSeek Balance',
+    available: 'Available',
+    unavailable: 'Unavailable',
+    noSession: 'Open a session to show balance',
+    loading: 'Loading…',
+    noBalance: 'No balance data',
+    granted: 'granted',
+    toppedUp: 'topped up',
+    updatedAt: 'Updated',
+    refresh: 'Refresh',
+    autoRefreshInterval: 'Auto-refresh interval',
+    language: 'Language',
+    languageAuto: 'Follow host UI',
+    languageZh: '中文',
+    languageEn: 'English',
+    priceTable: 'Price table (CNY / 1M tokens)',
+    save: 'Save',
+    oldPrice: 'Old',
+    offPeakPrice: 'Off-peak',
+    peakPrice: 'Peak',
+    inputLabel: 'Input (uncached)',
+    cacheHitLabel: 'Cache hit',
+    outputLabel: 'Output',
+    defaultModelLabel: 'Default (unknown models use this)',
+    switchoverHint: 'From 08-17 00:00 (Beijing time) the off-peak/peak prices apply; peak hours 9-12, 14-18. Estimate only — the official bill is authoritative.',
+    pausedTip: 'Auto-refresh paused: no new conversation for 2 cycles; resumes when a new message appears',
+    activeRefresh: 'Auto-refresh every',
+    seconds: 's',
+    clickRefresh: 'Click to refresh',
+    estimateNote: 'Estimated from the official price table, for reference only',
+    retry: 'Click to retry',
+    balance: 'Balance',
+    sessionApprox: 'Session ≈',
+    balanceDash: 'Balance —',
+    balanceLoading: 'Balance …',
+    unknownCurrency: 'Unknown currency',
+    sessionNoData: 'Session spend: no session data',
+    modelUnknown: 'Unknown model',
+    modelDefault: 'Default (unknown models use this)',
+  },
+}
+
+function t(lang: Lang, key: keyof typeof COPY.zh): string {
+  return COPY[lang][key] ?? COPY.zh[key] ?? String(key)
+}
+
+function intervalLabel(lang: Lang, ms: number): string {
+  return lang === 'zh' ? `${ms / 1000} 秒` : `${ms / 1000} s`
+}
+
+function fieldLabel(lang: Lang, field: string): string {
+  const key = field === 'input' ? 'inputLabel' : field === 'cacheHit' ? 'cacheHitLabel' : 'outputLabel'
+  return t(lang, key)
+}
 const FIELD_LABEL: Record<string, string> = { input: '输入(未命中)', cacheHit: '缓存命中', output: '输出' }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -134,10 +250,11 @@ function isPriceTable(value: unknown): value is PriceTable {
 export function apply(ctx: ClientContext): void {
   // 用户驱动的动作经现成的 commands 命名空间送达宿主（免去自定义 Remote 注册）。
   // 命令成功时以 JSON 文本回传数据，这里解析为结果载荷。
-  const runCommand = async (sessionId: string, line: string): Promise<ResultPayload | null> => {
+  const runCommand = async (sessionId: string | undefined, line: string): Promise<ResultPayload | null> => {
+      const sid = sessionId ?? ''
     try {
       // 生成的 Remote 命名空间返回 { ok, value } 信封。
-      const execution = await ctx.remote.commands.execute(sessionId as SessionId, line)
+      const execution = await ctx.remote.commands.execute(sid as SessionId, line)
       const value = isRecord(execution) && execution.ok === true ? execution.value : undefined
       const text = value !== undefined && isRecord(value) && isRecord(value.result)
         ? value.result.text
@@ -161,12 +278,14 @@ export function apply(ctx: ClientContext): void {
     const [intervalMs, setIntervalMs] = React.useState(30000)
     const [nextMs, setNextMs] = React.useState(30000)
     const [tip, setTip] = React.useState<{ left: number; right: number; top: number; bottom: number } | null>(null)
+      const [lang, setLang] = React.useState<Lang>(resolveLang(undefined))
+      const L = (key: keyof typeof COPY.zh) => t(lang, key)
     const anchorRef = React.useRef<HTMLButtonElement | null>(null)
     const bubbleRef = React.useRef<HTMLSpanElement | null>(null)
     const tipTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
     // 命令驱动：刷新 + 自调度。intervalMs 是设置值（用于展示），nextRefreshMs
-    // 是下次刷新的实际间隔（活跃=intervalMs，空闲=5 分钟降频）。
+    // 是下次刷新的实际间隔（活跃=intervalMs，暂停后=5 分钟低频探测以恢复）。
     React.useEffect(() => {
       let disposed = false
       let inFlight = false
@@ -182,6 +301,7 @@ export function apply(ctx: ClientContext): void {
           if (typeof payload.nextRefreshMs === 'number' && payload.nextRefreshMs !== nextMs) {
             setNextMs(payload.nextRefreshMs)
           }
+            if (typeof payload.language === 'string') setLang(resolveLang(payload.language))
           setView({ kind: 'data', result: payload })
         } finally {
           inFlight = false
@@ -191,6 +311,41 @@ export function apply(ctx: ClientContext): void {
       const timer = setInterval(() => { void tick() }, nextMs)
       return () => { disposed = true; clearInterval(timer) }
     }, [sessionId, intervalMs, nextMs])
+
+      // 暂停期间用户与页面交互时立即探测：发送新消息必然伴随点击/键盘事件，
+      // 这样无需等待最长为 PAUSED_REFRESH_MS 的下一次低频轮询即可恢复活跃刷新。
+      React.useEffect(() => {
+        if (true) return
+        let disposed = false
+        let inFlight = false
+        const probe = async () => {
+          if (inFlight || disposed) return
+          inFlight = true
+          try {
+            const payload = await runCommand(sessionId, '/dsh-balance refresh')
+            if (disposed || payload === null) return
+            if (typeof payload.intervalMs === 'number' && payload.intervalMs !== intervalMs) {
+              setIntervalMs(payload.intervalMs)
+            }
+            if (typeof payload.nextRefreshMs === 'number' && payload.nextRefreshMs !== nextMs) {
+              setNextMs(payload.nextRefreshMs)
+            }
+            if (typeof payload.language === 'string') setLang(resolveLang(payload.language))
+            if (typeof payload.language === 'string') setLang(resolveLang(payload.language))
+            setView({ kind: 'data', result: payload })
+          } finally {
+            inFlight = false
+          }
+        }
+        const onInteract = () => { void probe() }
+        window.addEventListener('click', onInteract)
+        window.addEventListener('keydown', onInteract)
+        return () => {
+          disposed = true
+          window.removeEventListener('click', onInteract)
+          window.removeEventListener('keydown', onInteract)
+        }
+      }, [sessionId, intervalMs, nextMs])
 
     const positionTip = () => {
       const el = anchorRef.current
@@ -231,31 +386,31 @@ export function apply(ctx: ClientContext): void {
         const infos = Array.isArray(result.data?.balance_infos) ? result.data.balance_infos : []
         if (infos.length > 0) {
           for (const info of infos) {
-            lines.push(`${String(info.currency ?? '')} 总额 ${String(info.total_balance ?? '0')}`
-              + `（赠送 ${String(info.granted_balance ?? '0')} / 充值 ${String(info.topped_up_balance ?? '0')}）`)
+            lines.push(`${String(info.currency ?? '')} ${lang === 'zh' ? '总额' : 'Balance'} ${String(info.total_balance ?? '0')}`
+              + `（${lang === 'zh' ? '赠送' : 'granted'} ${String(info.granted_balance ?? '0')} / ${lang === 'zh' ? '充值' : 'topped up'} ${String(info.topped_up_balance ?? '0')}）`)
           }
         } else {
-          lines.push('暂无余额数据')
+          lines.push(L('noBalance'))
         }
         const consumption = result.consumption as Consumption | null | undefined
         if (consumption !== undefined && consumption !== null && typeof consumption.cost === 'number') {
-          lines.push(`会话消耗 ≈ ${formatExact(consumption.cost)}（${consumption.model ?? '未知模型'}）`)
-          lines.push(`输入未命中 ${formatNum(consumption.uncachedInput)} / 缓存命中 ${formatNum(consumption.cacheRead)}`
-            + ` / 输出 ${formatNum(consumption.output)} tokens`)
+          lines.push(`${lang === 'zh' ? '会话消耗' : 'Session spend'} ≈ ${formatExact(consumption.cost)}（${consumption.model ?? (lang === 'zh' ? '未知模型' : 'Unknown model')}）`)
+          lines.push(`${lang === 'zh' ? '输入未命中' : 'Input (uncached)'} ${formatNum(consumption.uncachedInput)} / ${lang === 'zh' ? '缓存命中' : 'Cache hit'} ${formatNum(consumption.cacheRead)}`
+            + ` / ${lang === 'zh' ? '输出' : 'Output'} ${formatNum(consumption.output)} tokens`)
         } else if (consumption === null) {
-          lines.push('会话消耗：暂无会话数据')
+          lines.push(L('sessionNoData'))
         }
-        lines.push(`更新于 ${formatTime(result.fetchedAt)} · ${result.idle === true
-          ? '空闲中：自动刷新已降频至 5 分钟'
-          : `自动刷新每 ${Math.round(intervalMs / 1000)} 秒`} · 点击刷新`)
-        lines.push('按官方价目表估算，仅供参考')
+        lines.push(`${L('updatedAt')} ${formatTime(result.fetchedAt)} · ${result.idle === true
+          ? L('pausedTip')
+          : `${L('activeRefresh')} ${Math.round(intervalMs / 1000)} ${L('seconds')}`} · ${L('clickRefresh')}`)
+        lines.push(L('estimateNote'))
         return lines.join('\n')
       }
-      if (view.kind === 'error') return `${view.message}\n点击重试`
-      return '查询中…'
+      if (view.kind === 'error') return `${view.message}\n${L('retry')}`
+      return L('loading')
     }
 
-    let label = '余额 …'
+    let label = L('balanceLoading')
     let cls = styles.util
     if (view.kind === 'data') {
       const result = view.result
@@ -266,21 +421,21 @@ export function apply(ctx: ClientContext): void {
           const total = String(info.total_balance ?? '0')
           const consumption = result.consumption as Consumption | null | undefined
           label = consumption !== undefined && consumption !== null && typeof consumption.cost === 'number'
-            ? `余额 ${symbolOf(info.currency)}${total} | 会话 ≈${formatCost(consumption.cost)}`
-            : `余额 ${symbolOf(info.currency)}${total}`
+            ? `${L('balance')} ${symbolOf(info.currency)}${total} | ${L('sessionApprox')}${formatCost(consumption.cost)}`
+            : `${L('balance')} ${symbolOf(info.currency)}${total}`
           cls = result.data?.is_available === true
             ? `${styles.util} ${styles.utilOk}`
             : `${styles.util} ${styles.utilBad}`
         } else {
-          label = '余额 —'
+          label = L('balanceDash')
           cls = `${styles.util} ${styles.utilBad}`
         }
       } else {
-        label = '余额 —'
+        label = L('balanceDash')
         cls = `${styles.util} ${styles.utilErr}`
       }
     } else if (view.kind === 'error') {
-      label = '余额 —'
+      label = L('balanceDash')
       cls = `${styles.util} ${styles.utilErr}`
     }
 
@@ -327,6 +482,8 @@ export function apply(ctx: ClientContext): void {
     const [intervalMs, setIntervalMs] = React.useState(30000)
     const [nextMs, setNextMs] = React.useState(30000)
     const [prices, setPrices] = React.useState<PriceTable | null>(null)
+      const [lang, setLang] = React.useState<Lang>(resolveLang(undefined))
+      const L = (key: keyof typeof COPY.zh) => t(lang, key)
 
     // 命令驱动 + 自调度（与顶栏徽章同模式）；commands.execute 需要真实会话 ID。
     const applyPayload = (payload: ResultPayload): void => {
@@ -336,6 +493,7 @@ export function apply(ctx: ClientContext): void {
       }
       const nextPrices = payload.prices
       if (isPriceTable(nextPrices)) setPrices(prev => (prev ?? nextPrices) as PriceTable | null)
+        if (typeof payload.language === 'string') setLang(resolveLang(payload.language))
       setView({ kind: 'data', result: payload })
     }
     React.useEffect(() => {
@@ -358,6 +516,34 @@ export function apply(ctx: ClientContext): void {
       return () => { disposed = true; clearInterval(timer) }
     }, [sessionId, intervalMs, nextMs])
 
+      // 暂停期间用户与页面交互时立即探测：发送新消息必然伴随点击/键盘事件，
+      // 这样无需等待最长为 PAUSED_REFRESH_MS 的下一次低频轮询即可恢复活跃刷新。
+      React.useEffect(() => {
+        if (sessionId === undefined) return
+        if (true) return
+        let disposed = false
+        let inFlight = false
+        const probe = async () => {
+          if (inFlight || disposed) return
+          inFlight = true
+          try {
+            const payload = await runCommand(sessionId, '/dsh-balance refresh')
+            if (disposed || payload === null) return
+            applyPayload(payload)
+          } finally {
+            inFlight = false
+          }
+        }
+        const onInteract = () => { void probe() }
+        window.addEventListener('click', onInteract)
+        window.addEventListener('keydown', onInteract)
+        return () => {
+          disposed = true
+          window.removeEventListener('click', onInteract)
+          window.removeEventListener('keydown', onInteract)
+        }
+      }, [sessionId, intervalMs, nextMs])
+
     const applyInterval = (ms: number) => {
       if (sessionId === undefined) return
       void runCommand(sessionId, `/dsh-balance interval ${ms}`).then((payload) => {
@@ -370,6 +556,12 @@ export function apply(ctx: ClientContext): void {
         if (payload !== null) applyPayload(payload)
       })
     }
+      const applyLanguage = (value: string) => {
+        if (sessionId === undefined) return
+        void runCommand(sessionId, `/dsh-balance language ${value}`).then((payload) => {
+          if (payload !== null) applyPayload(payload)
+        })
+      }
     const setPrice = (model: string, phase: string, field: string, value: number) => {
       setPrices((prev): PriceTable | null => {
         if (prev === null) return prev
@@ -390,37 +582,38 @@ export function apply(ctx: ClientContext): void {
 
     const renderBody = () => {
       if (sessionId === undefined) {
-        return React.createElement('div', { className: styles.muted }, '打开会话后自动显示余额')
+        return React.createElement('div', { className: styles.muted }, L('noSession'))
       }
       if (view.kind === 'loading') {
-        return React.createElement('div', { className: styles.muted }, '查询中…')
+        return React.createElement('div', { className: styles.muted }, L('loading'))
       }
       if (view.kind === 'error') {
         return React.createElement('div', { className: styles.err }, view.message)
       }
       const result = view.result
+        const languageValue = typeof result.language === 'string' ? result.language : 'auto'
       if (result.ok !== true) {
-        const message = typeof result.error === 'string' ? result.error : '查询失败'
+        const message = typeof result.error === 'string' ? result.error : (lang === 'zh' ? '查询失败' : 'Query failed')
         return React.createElement('div', { className: styles.err }, message)
       }
       const elements: React.ReactNode[] = []
       const infos = Array.isArray(result.data?.balance_infos) ? result.data.balance_infos : []
       if (infos.length === 0) {
-        elements.push(React.createElement('div', { className: styles.muted, key: 'empty' }, '暂无余额数据'))
+        elements.push(React.createElement('div', { className: styles.muted, key: 'empty' }, L('noBalance')))
       } else {
         for (const info of infos) {
           elements.push(React.createElement('div', { className: styles.row, key: String(info.currency ?? '') },
-            React.createElement('span', null, String(info.currency ?? '未知币种')),
+            React.createElement('span', null, String(info.currency ?? L('unknownCurrency'))),
             React.createElement('span', null,
               React.createElement('span', { className: styles.total }, String(info.total_balance ?? '0')),
-              React.createElement('span', { className: styles.muted }, `（赠送 ${String(info.granted_balance ?? '0')} / 充值 ${String(info.topped_up_balance ?? '0')}）`),
+              React.createElement('span', { className: styles.muted }, `（${L('granted')} ${String(info.granted_balance ?? '0')} / ${L('toppedUp')} ${String(info.topped_up_balance ?? '0')}）`),
             ),
           ))
         }
       }
       const time = formatTime(result.fetchedAt)
       elements.push(React.createElement('div', { className: styles.foot, key: 'foot' },
-        React.createElement('span', { className: styles.muted }, `更新于 ${time}`),
+        React.createElement('span', { className: styles.muted }, `${L('updatedAt')} ${time}`),
         React.createElement('button', {
           className: styles.btn,
           onClick: () => {
@@ -430,37 +623,49 @@ export function apply(ctx: ClientContext): void {
             })
           },
           type: 'button',
-        }, '刷新'),
+        }, L('refresh')),
       ))
       if (withSettings) {
         elements.push(React.createElement('div', { className: styles.setrow, key: 'interval' },
-          React.createElement('span', null, '自动刷新间隔'),
+          React.createElement('span', null, L('autoRefreshInterval')),
           React.createElement('select', {
             className: styles.select,
             value: String(intervalMs),
             onChange: (event: React.ChangeEvent<HTMLSelectElement>) => { applyInterval(Number(event.target.value)) },
           }, INTERVAL_OPTIONS.map(option =>
-            React.createElement('option', { key: String(option.ms), value: String(option.ms) }, option.label))),
+            React.createElement('option', { key: String(option.ms), value: String(option.ms) }, intervalLabel(lang, option.ms)))),
         ))
+          elements.push(React.createElement('div', { className: styles.setrow, key: 'language' },
+            React.createElement('span', null, L('language')),
+            React.createElement('select', {
+              className: styles.select,
+              value: languageValue,
+              onChange: (event: React.ChangeEvent<HTMLSelectElement>) => { applyLanguage(event.target.value) },
+            },
+              React.createElement('option', { value: 'auto' }, L('languageAuto')),
+              React.createElement('option', { value: 'zh-CN' }, L('languageZh')),
+              React.createElement('option', { value: 'en' }, L('languageEn')),
+            ),
+          ))
       }
       if (withSettings && prices !== null) {
         elements.push(React.createElement('div', { className: styles.pricerow, key: 'price-head' },
-          React.createElement('span', null, '价格表（元 / 百万 tokens）'),
-          React.createElement('button', { className: styles.btn, onClick: applyPrices, type: 'button' }, '保存'),
+          React.createElement('span', null, L('priceTable')),
+          React.createElement('button', { className: styles.btn, onClick: applyPrices, type: 'button' }, L('save')),
         ))
         const grid: React.ReactNode[] = [
           React.createElement('div', { key: 'ph0' }, ''),
-          React.createElement('div', { className: styles.muted, key: 'ph1' }, '旧价'),
-          React.createElement('div', { className: styles.muted, key: 'ph2' }, '空闲时段'),
-          React.createElement('div', { className: styles.muted, key: 'ph3' }, '高峰时段'),
+          React.createElement('div', { className: styles.muted, key: 'ph1' }, L('oldPrice')),
+          React.createElement('div', { className: styles.muted, key: 'ph2' }, L('offPeakPrice')),
+          React.createElement('div', { className: styles.muted, key: 'ph3' }, L('peakPrice')),
         ]
         for (const model of PRICE_MODELS) {
           const entry = prices.models[model]
           if (entry === undefined) continue
           grid.push(React.createElement('div', { className: styles.priceModel, key: `${model}-name` },
-            model === 'default' ? '默认（未列出的模型按此计价）' : model))
+            model === 'default' ? L('defaultModelLabel') : model))
           for (const field of PRICE_FIELDS) {
-            grid.push(React.createElement('div', { className: styles.muted, key: `${model}-${field}` }, FIELD_LABEL[field] ?? field))
+            grid.push(React.createElement('div', { className: styles.muted, key: `${model}-${field}` }, fieldLabel(lang, field)))
             for (const phase of PRICE_PHASES) {
               const rates = entry[phase]
               if (rates === undefined) continue
@@ -481,18 +686,18 @@ export function apply(ctx: ClientContext): void {
         }
         elements.push(React.createElement('div', { className: styles.priceGrid, key: 'price-grid' }, grid))
         elements.push(React.createElement('div', { className: styles.muted, key: 'switchover' },
-          `08-17 00:00（北京时间）起使用「空闲/高峰」价；高峰时段 9-12、14-18。估算仅供参考，以官方账单为准。`))
+          L('switchoverHint')))
       }
       return React.createElement('div', null, ...elements)
     }
 
     return React.createElement('div', { className: styles.card },
       React.createElement('div', { className: styles.head },
-        React.createElement('span', null, 'DeepSeek 开放平台余额'),
+        React.createElement('span', null, L('settingsTitle')),
         view.kind === 'data' && view.result.ok === true
           ? (view.result.data?.is_available === true
-              ? React.createElement('span', { className: `${styles.badge} ${styles.ok}` }, '可用')
-              : React.createElement('span', { className: `${styles.badge} ${styles.bad}` }, '不可用'))
+              ? React.createElement('span', { className: `${styles.badge} ${styles.ok}` }, L('available'))
+              : React.createElement('span', { className: `${styles.badge} ${styles.bad}` }, L('unavailable')))
           : null,
       ),
       renderBody(),

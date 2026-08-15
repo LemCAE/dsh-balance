@@ -9,8 +9,8 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `src/index.ts` | Host 半：settings 注册、余额拉取、会话消耗增量折叠、`dsh-balance` 命令、`deepseek_balance` 工具 |
-| `src/client/index.ts` | Client 半：顶栏徽章、设置页卡片、Tooltip、命令驱动刷新 |
+| `src/index.ts` | Host 半：settings 注册（含 `language`）、余额拉取、会话消耗增量折叠、`dsh-balance` 命令、`deepseek_balance` 工具 |
+| `src/client/index.ts` | Client 半：顶栏徽章、设置页卡片（含界面语言）、Tooltip、命令驱动刷新、中英文案字典 |
 | `src/client/balance.module.css` | 界面样式（CSS Module） |
 | `cordis.patch.yml` | dsh.bundle patch：web profile 的 `insert` 行 |
 | `shared/` | clientBundle 预设 + 平台模块表（自主库复制，勿动） |
@@ -45,18 +45,21 @@ pnpm build              # tsc -b + tsdown（lib/index.js + lib/client.js + lib/i
 9. **发布用官方 registry**：项目级 `.npmrc` 锁定 `registry=https://registry.npmjs.org/`（用户级是 npmmirror 镜像，登录/发布会打到镜像账号体系）；workflow 的 publish 步骤也显式带 `--registry`。
 10. **provenance 与 repository.url**：`--provenance` 时 sigstore 要求 `repository.url` 与 OIDC 仓库标识字符串精确匹配——必须是 `https://github.com/LemCAE/dsh-balance`（无 `git+`、无 `.git`、保留大小写），否则 CI 报 `E422 Error verifying sigstore provenance bundle`。
 11. **peer 范围**：`^0.1.0-rc.5`（同时覆盖 rc.5 与 rc.6 宿主），不写 `workspace:`；host 半 `tsconfig.host.json` 必须 `types: ["node"]`（`AbortSignal` 来自 @types/node 全局）。
+12. **暂停恢复只认会话日志**：暂停后恢复由 Host 端低频探测会话日志中的 `user/message`、`assistant/message`、`assistant/chunk` 事件驱动；**不要**再用全局 `click`/`keydown` 监听触发探测（普通键鼠不是「新对话」，会造成暂停后高频查询）。
+13. **空读不推进游标**：`estimateConsumption` 中仅 `events.length > 0` 时才 `state.seq = lastSeq + 1`；空读保持原位，否则暂停期间低频探测会把 `seq` 推过尚未读到的新对话事件，导致恢复失败。
 
-## 当前状态与待办（2026-08-14）
+## 当前状态与待办（2026-08-15）
 
 - **已发布**：npm 0.1.0（手动首发）/ 0.1.2 / 0.1.3（CI + provenance）；GitHub Release v0.1.2、v0.1.3；Trusted Publishing 已配置（无 NPM_TOKEN）
-- **已安装并验证**：本机 web profile 经 `dsh plugin add` 登记 bundle（`profiles/web/package.json` 的 dependencies + `dsh.profile.bundles`）；重启 `dsh web` 后运行态验证通过（`deepseek_balance` 工具实测返回余额 CNY 6.78 + 会话消耗 ≈¥1.19；顶栏徽章/设置卡片可见）；旧开发目录已删除，主库工作区已清理
-- **待办**：功能迭代稳定后提交 awesome-dsh-plugin 收录（README.md + README.zh.md 同步）并补 README 徽章
+- **已安装并验证**：本机 web profile 经 `dsh plugin add` 登记 bundle；重启 `dsh web` 后运行态验证通过（余额、会话消耗、顶栏徽章/设置卡片可见）
+- **本次改动（未发布）**：暂停自动查询（只认 user/assistant 事件、空读不推进 seq、恢复判定改为观察增量）；设置页界面语言切换（`auto` 跟随主界面 / `zh-CN` / `en`，命令 `language <auto|zh-CN|en>`）；客户端中英文案
+- **待办**：`pnpm typecheck && pnpm build` 验证；功能迭代稳定后发版并提交 awesome-dsh-plugin 收录（README.md + README.zh.md 同步）并补 README 徽章
 
 ## 验证清单
 
 - `pnpm typecheck && pnpm build`；`pnpm pack --dry-run` 检查 tarball（lib + src + cordis.patch.yml + README）
 - 发布：推 `vX.Y.Z` tag → workflow 校验版本、构建、`pnpm publish --tag latest --provenance`、GitHub Release（**Trusted Publishing/OIDC，无需 NPM_TOKEN**；仓库 `repository.url` 必须精确等于 `https://github.com/LemCAE/dsh-balance` 才能通过 sigstore 校验）
 - 生态：仓库已打 `dsh-plugin` topic；awesome-dsh-plugin 收录待功能稳定后再提交（README.md + README.zh.md 同步）
-- 运行态：顶栏徽章（余额 | 会话 ≈x）、悬停气泡（按钮下方居中）、设置 → DeepSeek 余额；`Tool.listTools` 含 `deepseek_balance`，调用返回余额 + 消耗 + `nextRefreshMs`
+- 运行态：顶栏徽章（余额 | 会话 ≈x）、悬停气泡（按钮下方居中）、设置 → DeepSeek 余额（含界面语言切换，auto 跟随主界面）；`Tool.listTools` 含 `deepseek_balance`，调用返回余额 + 消耗 + `nextRefreshMs` + `language`；暂停后普通键鼠不触发查询，发送新消息后在下一次低频探测时恢复
 
 详见 `DEVELOPMENT.md`。

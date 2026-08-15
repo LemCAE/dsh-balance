@@ -6,15 +6,15 @@
  * travels only over the child's stdin), estimates the current session's spend
  * from durable per-step provider usage (uncached input / cache reads / output)
  * against the official price table (old fixed table until 2026-08-16 23:59
- * Beijing time, then the peak/off-peak table), and publishes everything to
- * every page over the allowlisted remote event bridge:
+ * Beijing time, then the peak/off-peak table). The page pulls everything on
+ * demand over the built-in commands Remote namespace:
  *
  *   client ctx.remote.commands.execute(sessionId, '/dsh-balance refresh')
- *     -> host command handler -> ctx.emit('dsh-balance/result', payload)
+ *     -> host command handler -> builds payload -> returns JSON text
  *   client ... '/dsh-balance interval <ms>' / '/dsh-balance prices <json>'
- *     -> host updates settings, re-schedules the push timer,
- *        emits 'dsh-balance/config'
- *   host timer -> periodic 'dsh-balance/result' pushes for every live session
+ *     -> host updates settings and returns a fresh payload
+ *   client timer -> periodic '/dsh-balance refresh' per returned nextRefreshMs
+ *     (active interval; paused detection interval after 2 quiet cycles)
  *
  * The model-facing tool `deepseek_balance` returns the same payload shape.
  */
@@ -118,11 +118,12 @@ const PriceTableSchema = z.object({
     'default': ModelPricesSchema,
   }),
 })
-type BalanceSettingsValue = { refreshIntervalMs: number; prices: PriceTable }
+type BalanceSettingsValue = { refreshIntervalMs: number; prices: PriceTable; language: 'auto' | 'zh-CN' | 'en' }
 
 const BalanceSettingsSchema = z.object({
   refreshIntervalMs: z.number().default(30000),
   prices: PriceTableSchema,
+  language: z.string().default('auto'),
 }) as unknown as z<BalanceSettingsValue>
 
 export const name = 'dsh-balance'
@@ -209,7 +210,7 @@ function priceFor(table: PriceTable, model: string | undefined, when: Date): Rat
 export function apply(ctx: Context): void {
   const ns = settingsNamespace('dsh-balance')
   const scope = ctx.settings.register(ns, BalanceSettingsSchema, {
-    base: { refreshIntervalMs: 30000, prices: DEFAULT_PRICE_TABLE },
+    base: { refreshIntervalMs: 30000, prices: DEFAULT_PRICE_TABLE, language: 'auto' },
   })
 
   const readInterval = (): number => {
@@ -220,6 +221,12 @@ export function apply(ctx: Context): void {
   const readPrices = (): PriceTable => {
     const value = scope.get().prices
     return isPriceTable(value) ? value : DEFAULT_PRICE_TABLE
+  }
+
+  /** 插件界面语言：auto 表示跟随宿主主界面语言（由客户端解析）。 */
+  const readLanguage = (): 'auto' | 'zh-CN' | 'en' => {
+    const value = scope.get().language
+    return value === 'zh-CN' || value === 'en' ? value : 'auto'
   }
 
   // ─── 余额查询：密钥只经 node 子进程 stdin 传递 ─────────────────────────
@@ -357,16 +364,17 @@ export function apply(ctx: Context): void {
     lastBuckets: { uncached: number; cacheRead: number; output: number } | null
     lastTime: Date
     lastModel: string | null
-    /** 最近一次会话活动（用户消息/助手输出/工具调用）的毫秒时间戳。 */
+    /** 最近一次新对话（用户消息或助手回复）的毫秒时间戳。 */
     lastActivity: number
   }
 
   const consumptionStates = new Map<string, ConsumptionState>()
 
-  const ACTIVITY_TYPES = new Set(['user/message', 'assistant/message', 'assistant/chunk', 'tool/result', 'tool/call'])
+  /** 视为“新对话”的事件：用户消息与助手回复（含流式增量）；工具/命令等内部事件不计入。 */
+  const ACTIVITY_TYPES = new Set(['user/message', 'assistant/message', 'assistant/chunk'])
 
-  /** 空闲时的自动刷新间隔。 */
-  const IDLE_REFRESH_MS = 300000
+  /** 暂停自动查询后的探测间隔：低频轮询以便在新对话出现后恢复。 */
+  const PAUSED_REFRESH_MS = 300000
 
   const costOf = (
     buckets: { uncached: number; cacheRead: number; output: number },
@@ -412,7 +420,7 @@ export function apply(ctx: Context): void {
         if (typeof seq === 'number' && seq >= lastSeq) lastSeq = seq
         const data = record['data']
         const time = record['time']
-        // 会话活动追踪：用户消息/助手输出/工具调用任一即视为活动。
+        // 新对话追踪：仅统计用户消息与助手回复（含流式增量）；命令/工具等内部事件不计入。
         if (typeof time === 'number' && typeof record['type'] === 'string' && ACTIVITY_TYPES.has(record['type'] as string)) {
           if (time > state.lastActivity) state.lastActivity = time
         }
@@ -454,7 +462,9 @@ export function apply(ctx: Context): void {
         state.lastTime = when
         state.lastModel = currentModel ?? null
       }
-      state.seq = lastSeq + 1
+      // 仅当本批有新增事件时才推进游标；空读保持原位，避免暂停期间
+      // 低频探测把 seq 推过尚未读到的新对话事件，导致恢复检测失败。
+      if (events.length > 0) state.seq = lastSeq + 1
       state.model = currentModel ?? null
       return {
         cost: state.cost,
@@ -482,13 +492,20 @@ export function apply(ctx: Context): void {
   const buildPayload = async (sessionId: string | undefined): Promise<Record<string, unknown>> => {
     const balance = await fetchBalanceCached(undefined)
     const table = readPrices()
+    const stateBefore = sessionId !== undefined ? consumptionStates.get(sessionId) : undefined
+    const lastActivityBefore = stateBefore?.lastActivity ?? 0
     const consumption = sessionId === undefined || sessionId.length === 0
       ? null
       : await estimateConsumption(sessionId, table)
     const state = sessionId !== undefined ? consumptionStates.get(sessionId) : undefined
     const lastActivity = state?.lastActivity ?? 0
-    // 空闲判定：连续 2 个刷新周期（2 × 设置的间隔）内无会话活动即降频。
-    const idle = lastActivity > 0 && Date.now() - lastActivity >= 2 * readInterval()
+    // 恢复优先：本次检查观察到新对话（lastActivity 变大）立即恢复活跃刷新；
+    // 否则连续 2 个刷新周期（2 × 设置的间隔）无新对话即暂停自动查询。
+    // 暂停期间仍以 PAUSED_REFRESH_MS 低频探测，直到某次探测发现新对话。
+    const observedNewConversation = lastActivity > lastActivityBefore
+    const idle = observedNewConversation
+      ? false
+      : lastActivity > 0 && Date.now() - lastActivity >= 2 * readInterval()
     return {
       ...balance,
       sessionId: sessionId ?? null,
@@ -497,7 +514,8 @@ export function apply(ctx: Context): void {
       prices: table,
       consumption,
       idle,
-      nextRefreshMs: idle ? IDLE_REFRESH_MS : readInterval(),
+      language: readLanguage(),
+        nextRefreshMs: idle ? PAUSED_REFRESH_MS : readInterval(),
     }
   }
 
@@ -506,7 +524,7 @@ export function apply(ctx: Context): void {
   ctx.commands.register({
     name: 'dsh-balance',
     description: '查询 DeepSeek 开放平台余额与当前会话消耗；或设置自动刷新间隔与价目表。',
-    input: { hint: 'refresh | interval <毫秒> | prices <JSON>' },
+    input: { hint: 'refresh | interval <毫秒> | prices <JSON> | language <auto|zh-CN|en>' },
     recordInput: true,
     handler: async (invocation) => {
       const sessionId = String(invocation.agent.session.id)
@@ -540,7 +558,13 @@ export function apply(ctx: Context): void {
         const payload = await buildPayload(sessionId)
         return { kind: 'success', text: JSON.stringify(payload) }
       }
-      return { kind: 'error', text: '用法：dsh-balance [refresh | interval <毫秒> | prices <JSON>]' }
+        const languageMatch = raw.match(/^language\s+(auto|zh-CN|en)$/)
+        if (languageMatch !== null) {
+          await scope.update({ language: languageMatch[1]! as 'auto' | 'zh-CN' | 'en' })
+          const payload = await buildPayload(sessionId)
+          return { kind: 'success', text: JSON.stringify(payload) }
+        }
+      return { kind: 'error', text: '用法：dsh-balance [refresh | interval <毫秒> | prices <JSON> | language <auto|zh-CN|en>]' }
     },
   })
 
@@ -573,6 +597,7 @@ export function apply(ctx: Context): void {
             data: balance.data,
             fetchedAt: new Date().toISOString(),
             intervalMs: readInterval(),
+              language: readLanguage(),
             prices: table,
             consumption,
           }
@@ -581,6 +606,7 @@ export function apply(ctx: Context): void {
             error: balance.error,
             fetchedAt: new Date().toISOString(),
             intervalMs: readInterval(),
+              language: readLanguage(),
             prices: table,
             consumption,
           }

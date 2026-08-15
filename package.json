@@ -1,7 +1,7 @@
 {
   "name": "@lemcae/dsh-balance",
   "description": "DeepSeek Open Platform balance and session consumption readout (host + web client)",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
@@ -38,7 +38,8 @@
     "src",
     "cordis.patch.yml",
     "README.md",
-    "README.zh.md"
+    "README.zh.md",
+    "image"
   ],
   "scripts": {
     "build": "tsc -b && tsdown",

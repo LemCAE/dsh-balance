@@ -6,6 +6,10 @@ A Host + Web Client composition plugin for [deepseek-harness](https://github.com
 (`dsh`): queries the DeepSeek Open Platform account balance and estimates the
 current session's spend. Installable via `dsh plugin add`.
 
+![1786756480460](image/README/1786756480460.png)
+
+![1786756488273](image/README/1786756488273.png)
+
 ## Features
 
 - **Balance**: queries the official `GET https://api.deepseek.com/user/balance`
@@ -20,12 +24,14 @@ current session's spend. Installable via `dsh plugin add`.
   hover (500 ms) shows a detail tooltip **below the button**, horizontally
   centered and viewport-clamped.
 - **Settings page** (设置 → DeepSeek 余额): balance rows, refresh-interval
-  selector, and an editable price table (old / off-peak / peak per model).
+  selector, UI-language selector (`auto` follows the host UI / 中文 / English),
+  and an editable price table (old / off-peak / peak per model).
   Changes persist in the settings document across restarts.
 - **Model tool**: `deepseek_balance` returns balance + the calling session's
   estimated spend.
-- **Idle-aware refresh**: after 2 refresh cycles without session activity the
-  auto-refresh drops to 5 minutes; it resumes on activity.
+- **Pause-aware refresh**: after 2 refresh cycles without a new user or
+  assistant message the auto-refresh pauses (5-minute detection cadence); it
+  resumes when a new conversation appears.
 - **Self-contained**: no host-repository changes are required to deploy
   (communication rides the built-in `commands` Remote namespace).
 
@@ -43,12 +49,11 @@ list; after restarting `dsh web`, the loader applies the in-package
 
 - Open any session → the `余额 ¥x | 会话 ≈¥y` chip appears in the header with
   a hover detail tooltip;
-- 设置 → DeepSeek 余额 shows the full card (balance, interval, price table);
+- 设置 → DeepSeek 余额 shows the full card (balance, interval, language, price table);
 - Ask the model to call the `deepseek_balance` tool.
 
 Manual install (same mechanism, bypassing the installer): edit
-`$DSH_HOME/profiles/web/package.json` — add `"@lemcae/dsh-balance": "<latest
-version>"` (as on npm) to `dependencies` and `"@lemcae/dsh-balance"` to the
+`$DSH_HOME/profiles/web/package.json` — add `"@lemcae/dsh-balance": "<latest version>"` (as on npm) to `dependencies` and `"@lemcae/dsh-balance"` to the
 `dsh.profile.bundles` array — then run `pnpm install` in that directory and
 restart.
 
@@ -59,21 +64,21 @@ provided by the host.
 ## Usage
 
 - **Chip**: shows `余额 ¥x | 会话 ≈¥y`; click to refresh; hover for details
-  (breakdown, model, 更新于, refresh cadence / idle note).
+  (breakdown, model, 更新于, refresh cadence / pause note).
 - **Settings**: 设置 → DeepSeek 余额 — balance rows, 自动刷新间隔
-  (15 s … 5 min), price-table editor (保存 persists), switchover hint.
-- **Command** (also usable from the command palette): `/dsh-balance
-  [refresh | interval <毫秒> | prices <JSON>]`.
+  (15 s … 5 min), 界面语言 (auto / 中文 / English), price-table editor (保存 persists), switchover hint.
+- **Command** (also usable from the command palette): `/dsh-balance [refresh | interval <毫秒> | prices <JSON> | language <auto|zh-CN|en>]`.
 - **Tool**: `deepseek_balance` (no arguments).
 
 ## Configuration
 
 Settings namespace `dsh-balance`:
 
-| Field | Default | Meaning |
-| --- | --- | --- |
-| `refreshIntervalMs` | `30000` | Active auto-refresh interval (5 000–600 000 ms) |
-| `prices` | see source | `{ switchover, models: { deepseek-v4-flash, deepseek-v4-pro, default } }`, each model `{ old, offPeak, peak }` rates in CNY per 1M tokens |
+| Field                 | Default    | Meaning                                                                                                                                       |
+| --------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `refreshIntervalMs` | `30000`  | Active auto-refresh interval (5 000–600 000 ms)                                                                                              |
+| `language`          | `auto`   | Plugin UI language:`auto` (follow host UI), `zh-CN`, or `en`                                                                            |
+| `prices`            | see source | `{ switchover, models: { deepseek-v4-flash, deepseek-v4-pro, default } }`, each model `{ old, offPeak, peak }` rates in CNY per 1M tokens |
 
 `switchover` default `2026-08-16T16:00:00Z` (2026-08-17 00:00 Beijing); before
 it the `old` rates apply, after it peak/off-peak by Beijing hour (peak
@@ -90,7 +95,10 @@ it the `old` rates apply, after it peak/off-peak by Beijing hour (peak
 - **Compaction**: a compacted session resets event seqs; the incremental fold
   may keep pre-compaction totals (acceptable for an estimate).
 - **Session-log noise**: every auto-refresh runs a slash command, appending
-  `command/run` + `command/done` events; idle-downshifting reduces this.
+  `command/run` + `command/done` events; pause-downshifting reduces this.
+- **Pause recovery latency**: while paused, the client probes once per
+  `PAUSED_REFRESH_MS` (5 min); a new conversation resumes the active cadence
+  at the next probe, so recovery can lag by up to that interval.
 - Balance is cached 10 s; the tool and chip may share one API call per cycle.
 
 ## Model Experience
@@ -112,33 +120,3 @@ consumption, prices, idle state).
 
 Prefix-stable: tool name, description, and schema are constant; the result
 varies per call, which does not invalidate prefix reuse.
-
-## Development
-
-- `pnpm install` then `pnpm build` (tsc -b + tsdown); `pnpm typecheck` for
-  types only.
-- Client-half changes: rebuild + hard-refresh the page. Host-half changes:
-  rebuild + restart the `dsh web` process.
-- See `DEVELOPMENT.md` for architecture, data flow, verify steps, and the
-  troubleshooting table. `AGENTS.md` carries the key constraints for other
-  sessions working in this repository.
-
-## Release
-
-Pushing a `vX.Y.Z` tag is the release switch: the [release workflow](.github/workflows/release.yml)
-verifies the tag matches `package.json` version, typechecks, builds, publishes
-`@lemcae/dsh-balance` to npm (`latest` dist-tag), and creates the GitHub
-Release.
-
-Publishing uses **npm Trusted Publishing** (OIDC) — no long-lived npm token in
-GitHub secrets. One-time setup: register the npm user `lemcae`, publish
-`0.1.0` once from a local machine (`npm login` then `pnpm publish --access
-public --no-git-checks`), then allow `LemCAE/dsh-balance` (workflow
-`release.yml`) as a trusted publisher on the package's npm settings page.
-
-Community listing (optional, once the plugin is stable): the repository
-already carries the [`dsh-plugin`](https://github.com/topics/dsh-plugin)
-topic; submit a one-line entry to
-[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
-(README.md and README.zh.md together), then add the Awesome badge to this
-README once listed.

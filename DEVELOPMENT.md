@@ -10,9 +10,10 @@
 
 - **余额**：调用 DeepSeek 官方 `GET https://api.deepseek.com/user/balance`（复用 harness 的 `DEEPSEEK_API_KEY` 凭据）；
 - **当前会话消耗估算**：基于本机会话日志中 provider 上报的 token usage（未命中输入 / 缓存命中 / 输出），按官方价目表（旧固定价 → 峰谷价）逐步骤计价；
-- **界面**：会话顶栏余额徽章（含按钮下方悬停气泡）、设置 →「DeepSeek 余额」页（余额、刷新间隔、可编辑价目表）；
+- **界面**：会话顶栏余额徽章（含按钮下方悬停气泡）、设置 →「DeepSeek 余额」页（余额、刷新间隔、界面语言、可编辑价目表）；
 - **模型工具**：`deepseek_balance`（余额 + 当前会话消耗）。
-- **空闲降频**：连续 2 个刷新周期无会话活动 → 自动刷新从设置间隔降为 5 分钟。
+- **暂停自动查询**：连续 2 个刷新周期无新对话（user/assistant 消息）→ 暂停自动查询
+  （转为 5 分钟低频探测）；出现新对话后自动恢复活跃刷新。
 - **完全自包含**：不修改宿主仓库任何代码（`api-remotes` 白名单、事件声明均已还原），一个包 + 一个 `dsh.bundle` patch 即可部署。
 
 **发布状态（2026-08-14）**：`@lemcae/dsh-balance` 已发布至 npm（0.1.0 手动首发 / 0.1.2、0.1.3 由 CI 发布并带
@@ -46,6 +47,47 @@ pnpm build                       # tsc -b + tsdown（lib/index.js + lib/client.j
 
 Client 半改动 → 重建 + 页面硬刷新即可；Host 半改动 → 重建 + 重启 `dsh web` 进程。
 
+### 2.1 日常开发工作流（两种模式）
+
+**模式 A：本地链接快速迭代（日常开发推荐）**——让运行中的 web 直接从本仓库加载代码，改完即生效，无需每次发版。
+
+一次性切换（把 npm 安装的包换成指向本地仓库的 junction；需先构建出 `lib/`）：
+
+```powershell
+cd D:\Project\dsh-balance
+pnpm build
+Remove-Item "$DSH_HOME\profiles\web\node_modules\@lemcae\dsh-balance" -Force   # 删 npm 版
+cmd /c mklink /J "$DSH_HOME\profiles\web\node_modules\@lemcae\dsh-balance" "D:\Project\dsh-balance"
+```
+
+日常循环：
+
+```powershell
+pnpm typecheck        # 查类型
+pnpm build            # 产出 lib/（lib/client.js 重新打包）
+```
+
+- 只改 Client 半（`src/client/**`）→ 重建后浏览器硬刷新（Ctrl+F5）即可，无需重启进程。
+- 改 Host 半（`src/index.ts`）→ 重建后重启 `dsh web`（如 `D:\deepseek-harness\restart-web.cmd`；
+  重启会中断当前会话的回合，属预期）。
+
+**模式 B：正式发版**（迭代稳定后走发布流水线，见 §10.1）：
+
+```powershell
+pnpm version patch                                # 0.1.x → 0.1.x+1（自动 commit + tag v0.1.x）
+git push origin main && git push origin v0.1.x    # CI 自动发布到 npm（Trusted Publishing + provenance）
+pnpm dsh plugin --profile web update @lemcae/dsh-balance   # 宿主更新到最新版
+```
+
+发版前**必须切回 npm 版**（`dsh plugin update` 会覆盖本地 junction）：
+
+```powershell
+Remove-Item "$DSH_HOME\profiles\web\node_modules\@lemcae\dsh-balance" -Force   # 删 junction
+pnpm dsh plugin --profile web update @lemcae/dsh-balance                        # 恢复 npm 安装
+```
+
+> 本机 `$DSH_HOME` = `C:\Users\tenge\.dsh`。注意：**未经明确指示不要推送仓库**（本地 commit 也先确认）。
+
 ## 3. 通信架构（自包含设计）
 
 **唯一通道：`commands` Remote 命名空间（宿主已内置，无需注册新 Remote）。**
@@ -66,7 +108,7 @@ Client                                  Host
 
 - **`inject` 必须声明 `['slots', 'remote', 'remote.commands']`** —— 客户端 ctx 守卫按属性名校验，缺 `remote.commands` 会在运行时抛 `cannot get property "remote.commands" without inject`。
 - 生成 Remote 返回 `{ ok, value } | { ok:false, error }` 信封，需解包。
-- 自动刷新由**客户端 `setInterval` 自调度**（浏览器原生 timer，非 timer 服务）；间隔取宿主返回的 `nextRefreshMs`（活跃 = 设置间隔，空闲 = 5 分钟）。
+- 自动刷新由**客户端 `setInterval` 自调度**（浏览器原生 timer，非 timer 服务）；间隔取宿主返回的 `nextRefreshMs`（活跃 = 设置间隔，暂停 = `PAUSED_REFRESH_MS` 5 分钟低频探测）。
 - **不要回退到事件桥**：客户端 `ctx.remote.$dispatch` 只做本地扇出（到不了宿主）；Host→Client 事件转发受 `packages/api/remotes/src/remote-events.ts` 白名单控制（曾加过 `dsh-balance/result`、`dsh-balance/config`，后随自包含改造还原）。
 
 ## 4. Host 半（src/index.ts）
@@ -80,11 +122,12 @@ export const inject = ['settings', 'tools', 'credentials', 'subprocess', 'sandbo
 settings 命名空间 `dsh-balance`（schemastery 模式）：
 
 ```ts
-type BalanceSettingsValue = { refreshIntervalMs: number; prices: PriceTable }
-// 注册时 base: { refreshIntervalMs: 30000, prices: DEFAULT_PRICE_TABLE }
+type BalanceSettingsValue = { refreshIntervalMs: number; prices: PriceTable; language: 'auto' | 'zh-CN' | 'en' }
+// 注册时 base: { refreshIntervalMs: 30000, prices: DEFAULT_PRICE_TABLE, language: 'auto' }
 ```
 
 - `refreshIntervalMs`：自动刷新间隔（5000–600000 校验，默认 30000）。
+- `language`：插件界面语言，`auto`（默认，跟随宿主主界面语言，由客户端解析）/ `zh-CN` / `en`。
 - `prices`：价目表 `{ switchover: ISO, models: { 'deepseek-v4-flash'|'deepseek-v4-pro'|'default': { old, offPeak, peak } } }`。
 - 持久化于设置文档，重启不丢；改动经命令 `scope.update` 写入。
 
@@ -101,6 +144,7 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
 
 - 数据：`sessionPersistence.readFrom(sessionId, fromSeq)` 只读 `seq ≥ fromSeq` 的新增事件（`sessionQuery` **没有** readFrom；其 `listEvents` 只返回轻量元数据，`readSession` 全量——均不可用于增量）。
 - 每会话状态：`{ seq, uncached, cacheRead, output, cost, model, lastStepKey, lastBuckets, lastTime, lastModel, lastActivity }`。
+- **游标推进**：仅当 `events.length > 0` 时才 `state.seq = lastSeq + 1`；空读保持原位，避免暂停期间低频探测把 `seq` 推过尚未读到的新对话事件。
 - 折叠规则：
   - `request/header` → 记当前模型（`data.header.config.model`）；
   - `assistant/message` 带 `data.usage`（`TokenUsage`：`inputTokens`=未命中、`cacheReadTokens`=命中、`outputTokens`）→ 按 `(turn,step)` **last-wins**（同一步重复采样先撤旧再计新，与 harness `tokenUsage` 投影同语义）；
@@ -108,15 +152,17 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
 - 计价表：`switchover = '2026-08-16T16:00:00Z'`（= 2026-08-17 00:00 北京时间）前用 `old`；之后按**北京时间**小时判峰谷（9-12、14-18 为高峰），高峰用 `peak`、其余 `offPeak`。默认价目表由用户提供（v4-flash / v4-pro / default 回退）。
 - 已知限制：会话被 compaction 重写 seq 后，增量状态可能停在旧值（估算场景可接受，未处理）。
 
-### 4.4 空闲降频
+### 4.4 暂停自动查询
 
-- 活动事件类型：`user/message`、`assistant/message`、`assistant/chunk`、`tool/result`、`tool/call`；折叠时更新 `lastActivity`（最大事件时间）。
-- `idle = lastActivity > 0 && now - lastActivity >= 2 * readInterval()`（默认 30s 周期 → 60s 无活动即降频）。
-- payload 携带 `idle` 与 `nextRefreshMs`（空闲 = 300000）。
+- 新对话事件类型：`user/message`、`assistant/message`、`assistant/chunk`；折叠时更新 `lastActivity`（最大事件时间）。`tool/*`、`command/*` 等内部事件不计入。
+- 暂停判定：`idle = lastActivity > 0 && now - lastActivity >= 2 * readInterval()`（默认 30s 周期 → 连续 2 个周期无新对话即暂停）。
+- **恢复判定**：`buildPayload` 比较本次检查前后 `lastActivity` 是否变大（`observedNewConversation`）。只要本次低频探测读到了新对话事件，即使该事件发生在几分钟前也立即恢复；否则按时间差判定暂停。这避免「暂停探测间隔 > 活跃间隔」时新对话因时间差过大而永远无法恢复。
+- payload 携带 `idle` 与 `nextRefreshMs`（暂停 = `PAUSED_REFRESH_MS` 300000）；暂停期间客户端只按该间隔低频探测，Host 端按会话日志判定新对话并恢复活跃间隔。
+- **不要**再在客户端用全局 `click` / `keydown` 监听触发探测：普通键盘/鼠标操作不是「新对话」，会导致暂停期间高频查询；恢复只应以会话日志中的 user/assistant 事件为准。
 
 ### 4.5 命令与工具
 
-- 命令 `dsh-balance`（`ctx.commands.register`）：`refresh` / `interval <ms>` / `prices <json>`；成功时 `text` 回传完整 payload JSON（客户端解析）。
+- 命令 `dsh-balance`（`ctx.commands.register`）：`refresh` / `interval <ms>` / `prices <json>` / `language <auto|zh-CN|en>`；成功时 `text` 回传完整 payload JSON（客户端解析）。
 - 工具 `deepseek_balance`（`ctx.tools.register(defineTool(...))`）：余额 + 调用方会话（`exec.agent.session.id`）消耗，返回同一 payload 形状。
 
 ### 4.6 Payload 形状
@@ -129,6 +175,7 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
   "fetchedAt": "ISO",
   "intervalMs": 30000,
   "prices": { "switchover": "…", "models": { … } },
+    "language": "auto",
   "consumption": { "cost": 5.59, "uncachedInput": 3100763, "cacheRead": 90815744, "output": 334476, "model": "deepseek-v4-flash", "currency": "CNY", "estimated": true } | null,
   "idle": false,
   "nextRefreshMs": 30000
@@ -144,9 +191,10 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
   - **气泡定位**：按钮正下方（`top = tip.bottom + 10`、`transform: translateY(0)`），水平以按钮中心居中，视口边缘 12px 夹紧。
 - **设置页卡片**（`settings.section`，`id: 'dsh-balance'`）：
   - 渲染器经标准 props `useSessions(state => state.current)` 取当前会话 ID（命令需要真实 ID，`''` 无效）；无会话时显示提示；
-  - 余额行 + 刷新间隔下拉 + 价目表网格（4 列：行标签/旧价/空闲/高峰，模型分块子标题）；
+  - 余额行 + 刷新间隔下拉 + 界面语言下拉（`auto` 跟随主界面 / `zh-CN` / `en`，经 `language` 命令持久化）+ 价目表网格（4 列：行标签/旧价/空闲/高峰，模型分块子标题）；
   - 价格编辑为草稿态，点「保存」走 `prices` 命令持久化。
-- `runCommand`：`commands.execute` → 解 `{ok,value}` 信封 → `value.result.text` JSON.parse；失败返回 null（静默降级）。
+- `runCommand`：接受 `string | undefined`（内部 `?? ''` 兜底）→ `commands.execute` → 解 `{ok,value}` 信封 → `value.result.text` JSON.parse；失败返回 null（静默降级）。
+- **界面语言**：`resolveLang(payload.language)` 解析当前语言；`auto` 时读取 `document.documentElement.lang || navigator.language`（`/^zh/i` 用中文，否则英文）。文案字典 `COPY` / `t()` 驱动中英切换。
 - 无 `$on`/事件订阅；无 `styles.insert`（CSS Module）。
 
 ## 6. 部署接线（安装方式）
@@ -173,7 +221,7 @@ cd D:\Project\dsh-balance
 pnpm typecheck && pnpm build                  # 构建门禁
 pnpm pack --dry-run                           # 检查 tarball 内容（lib + src + cordis.patch.yml + README）
 # 安装后（dsh web 重启）：
-# 页面：顶栏徽章、悬停气泡（按钮下方）、设置页卡片、间隔/价格编辑生效且刷新后保留
+# 页面：顶栏徽章、悬停气泡（按钮下方）、设置页卡片、间隔/语言/价格编辑生效且刷新后保留
 ```
 - 本会话 `Tool.listTools` 应含 `deepseek_balance`；调用返回余额 + 消耗 + `nextRefreshMs`。
 - 安装检查：`$DSH_HOME/profiles/web/package.json` 的 `dependencies` 与 `dsh.profile.bundles`
@@ -191,6 +239,7 @@ pnpm pack --dry-run                           # 检查 tarball 内容（lib + sr
 | patch 行不生效 | 裸 `- id:` 是覆盖语义 | 用 `- insert:` |
 | 包解析不到 | 模块链接缺失（手动安装路径） | 用 `dsh plugin add` 或建 junction |
 | 气泡不显示 | 曾用 client timer 服务（不可靠） | 改浏览器 `setTimeout` |
+| 暂停后仍高频查询 | 曾用全局 `click`/`keydown` 监听触发探测，普通键鼠不是「新对话」 | 恢复仅由 Host 端低频探测会话日志中的 user/assistant 事件驱动，勿再加交互监听 |
 | 构建报 `exactOptionalPropertyTypes` | 显式传 `prop: undefined` | 条件构造 props |
 | CI `Setup pnpm` 报 `ERR_PNPM_BAD_PM_VERSION` | action-setup 的 `version` 与 package.json `packageManager` 同时指定 | workflow 删掉 `version` 参数，packageManager 为准 |
 | CI publish 报 `E422 Error verifying sigstore provenance bundle` | `repository.url` 与 OIDC 仓库标识不一致（写成了 `git+https://github.com/lemcae/dsh-balance.git`） | 必须精确写 `https://github.com/LemCAE/dsh-balance`（无 `git+`、无 `.git`、保留大小写） |
@@ -204,7 +253,7 @@ pnpm pack --dry-run                           # 检查 tarball 内容（lib + sr
 - **发布开关 = 推送 `vX.Y.Z` tag**：`.github/workflows/release.yml` 校验 tag == `package.json` 版本（`scripts/verify-version.mjs`）→ typecheck → build → `pnpm publish --access public --tag latest` → `gh release create`。**认证走 npm Trusted Publishing（OIDC，`id-token: write`）**，无需 NPM_TOKEN secret；一次性前置：npm 注册用户 `lemcae` → 本机手动首发 `0.1.0`（`npm login` + `pnpm publish`）→ npm 包设置页把 `LemCAE/dsh-balance`（workflow `release.yml`）添加为可信发布者。
 - peer 依赖由消费者（dsh 宿主）自行提供（`@deepseek-ai/*` 系列 + `react`）；peer 范围写真实版本（`^0.1.0-rc.5`，兼容 rc.5 与 rc.6 宿主），不写 `workspace:`。
 - 生态收录：仓库打 `dsh-plugin` topic；向 awesome-dsh-plugin 提交一行条目（README.md + README.zh.md 同步），其站点每日生成 plugins.json 供 dsh-market 白名单使用。
-- 已知代价：每次自动刷新都会写入 `command/run` + `command/done` 两条会话日志事件（空闲降频后大幅减少）。
+- 已知代价：每次自动刷新都会写入 `command/run` + `command/done` 两条会话日志事件（暂停自动查询后大幅减少）。
 
 ## 10. 发布实战记录（2026-08-14 首次发布）
 
