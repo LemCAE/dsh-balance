@@ -50,10 +50,10 @@ pnpm build              # tsc -b + tsdown（lib/index.js + lib/client.js + lib/i
 
 ## 当前状态与待办（2026-08-15）
 
-- **已发布**：npm 0.1.0（手动首发）/ 0.1.2 / 0.1.3（CI + provenance）；GitHub Release v0.1.2、v0.1.3；Trusted Publishing 已配置（无 NPM_TOKEN）
+- **已发布**：npm 0.1.0（手动首发）/ 0.1.2 / 0.1.3 / 0.1.4（CI + provenance）；GitHub Release v0.1.2、v0.1.3、v0.1.4；Trusted Publishing 已配置（无 NPM_TOKEN）
 - **已安装并验证**：本机 web profile 经 `dsh plugin add` 登记 bundle；重启 `dsh web` 后运行态验证通过（余额、会话消耗、顶栏徽章/设置卡片可见）
-- **本次改动（未发布）**：暂停自动查询（只认 user/assistant 事件、空读不推进 seq、恢复判定改为观察增量）；设置页界面语言切换（`auto` 跟随主界面 / `zh-CN` / `en`，命令 `language <auto|zh-CN|en>`）；客户端中英文案
-- **待办**：`pnpm typecheck && pnpm build` 验证；功能迭代稳定后发版并提交 awesome-dsh-plugin 收录（README.md + README.zh.md 同步）并补 README 徽章
+- **0.1.4 已发布**（CI + provenance，workflow run 成功）：暂停自动查询（只认 user/assistant 事件、空读不推进 seq、恢复判定改为观察增量）；设置页界面语言切换（`auto` 跟随主界面 / `zh-CN` / `en`，命令 `language <auto|zh-CN|en>`）；客户端中英文案；tarball 补 `image/`（README 截图）
+- **待办**：提交 awesome-dsh-plugin 收录（README.md + README.zh.md 同步）并补 README 徽章
 
 ## 验证清单
 
