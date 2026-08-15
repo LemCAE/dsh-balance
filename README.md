@@ -6,9 +6,11 @@ A Host + Web Client composition plugin for [deepseek-harness](https://github.com
 (`dsh`): queries the DeepSeek Open Platform account balance and estimates the
 current session's spend. Installable via `dsh plugin add`.
 
-![1786756480460](image/README/1786756480460.png)
+![1786767329895](image/README/1786767329895.png)
 
-![1786756488273](image/README/1786756488273.png)
+![1786767316204](image/README/1786767316204.png)
+
+![1786767285766](image/README/1786767285766.png)
 
 ## Features
 
@@ -23,15 +25,18 @@ current session's spend. Installable via `dsh plugin add`.
 - **Top-bar chip** (session header): `余额 ¥x | 会话 ≈¥y`, click to refresh;
   hover (500 ms) shows a detail tooltip **below the button**, horizontally
   centered and viewport-clamped.
-- **Settings page** (设置 → DeepSeek 余额): balance rows, refresh-interval
-  selector, UI-language selector (`auto` follows the host UI / 中文 / English),
+- **Settings page** (设置 → DeepSeek 余额): balance rows, an auto-refresh
+  on/off switch, refresh-interval selector (15 s … 5 min or custom),
+  UI-language selector (`auto` follows the host UI / 中文 / English),
   and an editable price table (old / off-peak / peak per model).
   Changes persist in the settings document across restarts.
 - **Model tool**: `deepseek_balance` returns balance + the calling session's
   estimated spend.
 - **Pause-aware refresh**: after 2 refresh cycles without a new user or
   assistant message the auto-refresh pauses (5-minute detection cadence); it
-  resumes when a new conversation appears.
+  resumes when a new conversation appears. Auto-refresh can also be switched
+  off manually (Settings switch or `/dsh-balance auto-refresh off`); while
+  off, no queries are issued.
 - **Self-contained**: no host-repository changes are required to deploy
   (communication rides the built-in `commands` Remote namespace).
 
@@ -66,8 +71,8 @@ provided by the host.
 - **Chip**: shows `余额 ¥x | 会话 ≈¥y`; click to refresh; hover for details
   (breakdown, model, 更新于, refresh cadence / pause note).
 - **Settings**: 设置 → DeepSeek 余额 — balance rows, 自动刷新间隔
-  (15 s … 5 min), 界面语言 (auto / 中文 / English), price-table editor (保存 persists), switchover hint.
-- **Command** (also usable from the command palette): `/dsh-balance [refresh | interval <毫秒> | prices <JSON> | language <auto|zh-CN|en>]`.
+  (15 s … 5 min or custom), 自动刷新开关, 界面语言 (auto / 中文 / English), price-table editor (保存 persists), switchover hint.
+- **Command** (also usable from the command palette): `/dsh-balance [refresh | interval <毫秒> | prices <JSON> | language <auto|zh-CN|en> | auto-refresh <on|off>]`.
 - **Tool**: `deepseek_balance` (no arguments).
 
 ## Configuration
@@ -76,6 +81,7 @@ Settings namespace `dsh-balance`:
 
 | Field                 | Default    | Meaning                                                                                                                                       |
 | --------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `autoRefresh`       | `true`   | Enable/disable the auto-refresh timer (`/dsh-balance auto-refresh on\|off`)                                                                  |
 | `refreshIntervalMs` | `30000`  | Active auto-refresh interval (5 000–600 000 ms)                                                                                              |
 | `language`          | `auto`   | Plugin UI language:`auto` (follow host UI), `zh-CN`, or `en`                                                                            |
 | `prices`            | see source | `{ switchover, models: { deepseek-v4-flash, deepseek-v4-pro, default } }`, each model `{ old, offPeak, peak }` rates in CNY per 1M tokens |

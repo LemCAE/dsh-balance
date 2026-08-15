@@ -118,12 +118,13 @@ const PriceTableSchema = z.object({
     'default': ModelPricesSchema,
   }),
 })
-type BalanceSettingsValue = { refreshIntervalMs: number; prices: PriceTable; language: 'auto' | 'zh-CN' | 'en' }
+type BalanceSettingsValue = { refreshIntervalMs: number; prices: PriceTable; language: 'auto' | 'zh-CN' | 'en'; autoRefresh: boolean }
 
 const BalanceSettingsSchema = z.object({
   refreshIntervalMs: z.number().default(30000),
   prices: PriceTableSchema,
   language: z.string().default('auto'),
+  autoRefresh: z.boolean().default(true),
 }) as unknown as z<BalanceSettingsValue>
 
 export const name = 'dsh-balance'
@@ -210,7 +211,7 @@ function priceFor(table: PriceTable, model: string | undefined, when: Date): Rat
 export function apply(ctx: Context): void {
   const ns = settingsNamespace('dsh-balance')
   const scope = ctx.settings.register(ns, BalanceSettingsSchema, {
-    base: { refreshIntervalMs: 30000, prices: DEFAULT_PRICE_TABLE, language: 'auto' },
+    base: { refreshIntervalMs: 30000, prices: DEFAULT_PRICE_TABLE, language: 'auto', autoRefresh: true },
   })
 
   const readInterval = (): number => {
@@ -228,6 +229,8 @@ export function apply(ctx: Context): void {
     const value = scope.get().language
     return value === 'zh-CN' || value === 'en' ? value : 'auto'
   }
+
+    const readAutoRefresh = (): boolean => scope.get().autoRefresh !== false
 
   // ─── 余额查询：密钥只经 node 子进程 stdin 传递 ─────────────────────────
 
@@ -515,6 +518,7 @@ export function apply(ctx: Context): void {
       consumption,
       idle,
       language: readLanguage(),
+        autoRefresh: readAutoRefresh(),
         nextRefreshMs: idle ? PAUSED_REFRESH_MS : readInterval(),
     }
   }
@@ -523,8 +527,8 @@ export function apply(ctx: Context): void {
 
   ctx.commands.register({
     name: 'dsh-balance',
-    description: '查询 DeepSeek 开放平台余额与当前会话消耗；或设置自动刷新间隔与价目表。',
-    input: { hint: 'refresh | interval <毫秒> | prices <JSON> | language <auto|zh-CN|en>' },
+    description: '查询 DeepSeek 开放平台余额与当前会话消耗；或设置自动刷新开关/间隔、界面语言与价目表。',
+    input: { hint: 'refresh | interval <毫秒> | prices <JSON> | language <auto|zh-CN|en> | auto-refresh <on|off>' },
     recordInput: true,
     handler: async (invocation) => {
       const sessionId = String(invocation.agent.session.id)
@@ -564,7 +568,13 @@ export function apply(ctx: Context): void {
           const payload = await buildPayload(sessionId)
           return { kind: 'success', text: JSON.stringify(payload) }
         }
-      return { kind: 'error', text: '用法：dsh-balance [refresh | interval <毫秒> | prices <JSON> | language <auto|zh-CN|en>]' }
+        const autoRefreshMatch = raw.match(/^auto-refresh\s+(on|off)$/)
+        if (autoRefreshMatch !== null) {
+          await scope.update({ autoRefresh: autoRefreshMatch[1] === 'on' })
+          const payload = await buildPayload(sessionId)
+          return { kind: 'success', text: JSON.stringify(payload) }
+        }
+      return { kind: 'error', text: '用法：dsh-balance [refresh | interval <毫秒> | prices <JSON> | language <auto|zh-CN|en> | auto-refresh <on|off>]' }
     },
   })
 
@@ -598,6 +608,7 @@ export function apply(ctx: Context): void {
             fetchedAt: new Date().toISOString(),
             intervalMs: readInterval(),
               language: readLanguage(),
+                autoRefresh: readAutoRefresh(),
             prices: table,
             consumption,
           }
@@ -607,6 +618,7 @@ export function apply(ctx: Context): void {
             fetchedAt: new Date().toISOString(),
             intervalMs: readInterval(),
               language: readLanguage(),
+                autoRefresh: readAutoRefresh(),
             prices: table,
             consumption,
           }

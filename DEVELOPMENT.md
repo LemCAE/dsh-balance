@@ -14,9 +14,11 @@
 - **模型工具**：`deepseek_balance`（余额 + 当前会话消耗）。
 - **暂停自动查询**：连续 2 个刷新周期无新对话（user/assistant 消息）→ 暂停自动查询
   （转为 5 分钟低频探测）；出现新对话后自动恢复活跃刷新。
+- **自动刷新手动开关**：设置项 `autoRefresh`（默认 true），设置页开关或命令
+  `auto-refresh <on|off>` 切换；关闭后客户端不再发起任何查询（与上面的暂停正交）。
 - **完全自包含**：不修改宿主仓库任何代码（`api-remotes` 白名单、事件声明均已还原），一个包 + 一个 `dsh.bundle` patch 即可部署。
 
-**发布状态（2026-08-14）**：`@lemcae/dsh-balance` 已发布至 npm（0.1.0 手动首发 / 0.1.2、0.1.3 由 CI 发布并带
+**发布状态（2026-08-15）**：`@lemcae/dsh-balance` 已发布至 npm（0.1.0 手动首发 / 0.1.2、0.1.3、0.1.4 由 CI 发布并带
 sigstore provenance），发布认证走 npm Trusted Publishing（OIDC），无需 NPM_TOKEN。本机 web profile 已通过
 `dsh plugin add` 完成 bundle 安装并**重启验证通过**（`deepseek_balance` 工具实测返回余额 CNY 6.78 与
 本会话消耗 ≈¥1.19；顶栏徽章与设置卡片可见）；主库开发目录已删除，工作区已清理。
@@ -35,6 +37,7 @@ dsh-balance/（独立仓库根）
   src/client/index.ts # Client 半
   src/client/balance.module.css
   src/css-modules.d.ts
+  image/              # README 截图（image/README EN + image/README.zh）
   README.md / README.zh.md / AGENTS.md / DEVELOPMENT.md
 ```
 
@@ -122,10 +125,11 @@ export const inject = ['settings', 'tools', 'credentials', 'subprocess', 'sandbo
 settings 命名空间 `dsh-balance`（schemastery 模式）：
 
 ```ts
-type BalanceSettingsValue = { refreshIntervalMs: number; prices: PriceTable; language: 'auto' | 'zh-CN' | 'en' }
-// 注册时 base: { refreshIntervalMs: 30000, prices: DEFAULT_PRICE_TABLE, language: 'auto' }
+type BalanceSettingsValue = { refreshIntervalMs: number; prices: PriceTable; language: 'auto' | 'zh-CN' | 'en'; autoRefresh: boolean }
+// 注册时 base: { refreshIntervalMs: 30000, prices: DEFAULT_PRICE_TABLE, language: 'auto', autoRefresh: true }
 ```
 
+- `autoRefresh`：是否启用自动刷新（默认 true，命令 `auto-refresh <on|off>`）。
 - `refreshIntervalMs`：自动刷新间隔（5000–600000 校验，默认 30000）。
 - `language`：插件界面语言，`auto`（默认，跟随宿主主界面语言，由客户端解析）/ `zh-CN` / `en`。
 - `prices`：价目表 `{ switchover: ISO, models: { 'deepseek-v4-flash'|'deepseek-v4-pro'|'default': { old, offPeak, peak } } }`。
@@ -158,11 +162,12 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
 - 暂停判定：`idle = lastActivity > 0 && now - lastActivity >= 2 * readInterval()`（默认 30s 周期 → 连续 2 个周期无新对话即暂停）。
 - **恢复判定**：`buildPayload` 比较本次检查前后 `lastActivity` 是否变大（`observedNewConversation`）。只要本次低频探测读到了新对话事件，即使该事件发生在几分钟前也立即恢复；否则按时间差判定暂停。这避免「暂停探测间隔 > 活跃间隔」时新对话因时间差过大而永远无法恢复。
 - payload 携带 `idle` 与 `nextRefreshMs`（暂停 = `PAUSED_REFRESH_MS` 300000）；暂停期间客户端只按该间隔低频探测，Host 端按会话日志判定新对话并恢复活跃间隔。
+- **手动开关与暂停正交**：设置项 `autoRefresh`（默认 true）由设置页开关或命令 `auto-refresh <on|off>` 写入；关闭后客户端 `tick` 直接短路（不发查询），气泡提示「自动刷新已关闭」。idle 暂停由 Host 判定且能自动恢复，手动关闭则持续不查直到重新打开——两者互不替代。
 - **不要**再在客户端用全局 `click` / `keydown` 监听触发探测：普通键盘/鼠标操作不是「新对话」，会导致暂停期间高频查询；恢复只应以会话日志中的 user/assistant 事件为准。
 
 ### 4.5 命令与工具
 
-- 命令 `dsh-balance`（`ctx.commands.register`）：`refresh` / `interval <ms>` / `prices <json>` / `language <auto|zh-CN|en>`；成功时 `text` 回传完整 payload JSON（客户端解析）。
+- 命令 `dsh-balance`（`ctx.commands.register`）：`refresh` / `interval <ms>` / `prices <json>` / `language <auto|zh-CN|en>` / `auto-refresh <on|off>`；成功时 `text` 回传完整 payload JSON（客户端解析）。
 - 工具 `deepseek_balance`（`ctx.tools.register(defineTool(...))`）：余额 + 调用方会话（`exec.agent.session.id`）消耗，返回同一 payload 形状。
 
 ### 4.6 Payload 形状
@@ -175,7 +180,8 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
   "fetchedAt": "ISO",
   "intervalMs": 30000,
   "prices": { "switchover": "…", "models": { … } },
-    "language": "auto",
+  "language": "auto",
+  "autoRefresh": true,
   "consumption": { "cost": 5.59, "uncachedInput": 3100763, "cacheRead": 90815744, "output": 334476, "model": "deepseek-v4-flash", "currency": "CNY", "estimated": true } | null,
   "idle": false,
   "nextRefreshMs": 30000
@@ -188,10 +194,11 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
 - **顶栏徽章**（`conversation.session.header.utilities`，注册 `id: 'dsh-balance'`）：
   - 从 slot props 取 `sessionId`；`useEffect` 驱动「立即刷新 + `setInterval(nextMs)` 自调度」，`inFlight` 防重入；
   - 点击按钮 = 手动刷新；悬停 500ms（浏览器 `setTimeout`，非 timer 服务）显示气泡；
-  - **气泡定位**：按钮正下方（`top = tip.bottom + 10`、`transform: translateY(0)`），水平以按钮中心居中，视口边缘 12px 夹紧。
+  - **气泡定位**：按钮正下方（`top = tip.bottom + 10`、`transform: translateY(0)`），水平以按钮中心居中，视口边缘 12px 夹紧；
+  - 自动刷新关闭时气泡状态行显示「自动刷新已关闭」（`autoRefreshDisabledTip`）。
 - **设置页卡片**（`settings.section`，`id: 'dsh-balance'`）：
   - 渲染器经标准 props `useSessions(state => state.current)` 取当前会话 ID（命令需要真实 ID，`''` 无效）；无会话时显示提示；
-  - 余额行 + 刷新间隔下拉 + 界面语言下拉（`auto` 跟随主界面 / `zh-CN` / `en`，经 `language` 命令持久化）+ 价目表网格（4 列：行标签/旧价/空闲/高峰，模型分块子标题）；
+  - 余额行 + 自动刷新开关（on/off，经 `auto-refresh` 命令持久化）+ 刷新间隔下拉（预设 15s–5min，非预设值显示「自定义…」）+ 自定义间隔输入行（数字 5000–600000，校验后「应用」）+ 界面语言下拉（`auto` 跟随主界面 / `zh-CN` / `en`，经 `language` 命令持久化）+ 价目表网格（4 列：行标签/旧价/空闲/高峰，模型分块子标题）；
   - 价格编辑为草稿态，点「保存」走 `prices` 命令持久化。
 - `runCommand`：接受 `string | undefined`（内部 `?? ''` 兜底）→ `commands.execute` → 解 `{ok,value}` 信封 → `value.result.text` JSON.parse；失败返回 null（静默降级）。
 - **界面语言**：`resolveLang(payload.language)` 解析当前语言；`auto` 时读取 `document.documentElement.lang || navigator.language`（`/^zh/i` 用中文，否则英文）。文案字典 `COPY` / `t()` 驱动中英切换。
@@ -221,7 +228,8 @@ cd D:\Project\dsh-balance
 pnpm typecheck && pnpm build                  # 构建门禁
 pnpm pack --dry-run                           # 检查 tarball 内容（lib + src + cordis.patch.yml + README）
 # 安装后（dsh web 重启）：
-# 页面：顶栏徽章、悬停气泡（按钮下方）、设置页卡片、间隔/语言/价格编辑生效且刷新后保留
+# 页面：顶栏徽章、悬停气泡（按钮下方）、设置页卡片、间隔/语言/价格编辑生效且刷新后保留；
+#       自动刷新开关关闭后气泡显示「自动刷新已关闭」且不再查询；自定义间隔（如 12345）应用后生效
 ```
 - 本会话 `Tool.listTools` 应含 `deepseek_balance`；调用返回余额 + 消耗 + `nextRefreshMs`。
 - 安装检查：`$DSH_HOME/profiles/web/package.json` 的 `dependencies` 与 `dsh.profile.bundles`
@@ -282,6 +290,7 @@ GitHub Actions（release.yml，v* tag 触发）：
 | 0.1.1 | CI | 失败：sigstore provenance 校验 repository.url 不匹配（见 10.3-3）；registry 拒绝，未发布 |
 | 0.1.2 | CI | 成功：首次带 provenance 的 CI 发布 + GitHub Release |
 | 0.1.3 | CI | 成功：peer 范围放宽为 `^0.1.0-rc.5`（见 10.3-4） |
+| 0.1.4 | CI | 成功：暂停感知自动查询 + 界面语言切换 + 中英文案（本机运行态验证通过后发布） |
 
 ### 10.3 关键坑与决策
 

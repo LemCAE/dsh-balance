@@ -47,13 +47,15 @@ pnpm build              # tsc -b + tsdown（lib/index.js + lib/client.js + lib/i
 11. **peer 范围**：`^0.1.0-rc.5`（同时覆盖 rc.5 与 rc.6 宿主），不写 `workspace:`；host 半 `tsconfig.host.json` 必须 `types: ["node"]`（`AbortSignal` 来自 @types/node 全局）。
 12. **暂停恢复只认会话日志**：暂停后恢复由 Host 端低频探测会话日志中的 `user/message`、`assistant/message`、`assistant/chunk` 事件驱动；**不要**再用全局 `click`/`keydown` 监听触发探测（普通键鼠不是「新对话」，会造成暂停后高频查询）。
 13. **空读不推进游标**：`estimateConsumption` 中仅 `events.length > 0` 时才 `state.seq = lastSeq + 1`；空读保持原位，否则暂停期间低频探测会把 `seq` 推过尚未读到的新对话事件，导致恢复失败。
+14. **手动开关与暂停正交**：`autoRefresh` 设置项（默认 true，设置页开关或 `auto-refresh <on|off>` 命令写入）关闭后客户端 `tick` 直接短路（不再查询，气泡显示「自动刷新已关闭」）；idle 暂停由 Host 按会话日志判定、可自动恢复，手动关闭则持续不查直到重新打开——两者互不替代。
 
 ## 当前状态与待办（2026-08-15）
 
 - **已发布**：npm 0.1.0（手动首发）/ 0.1.2 / 0.1.3 / 0.1.4（CI + provenance）；GitHub Release v0.1.2、v0.1.3、v0.1.4；Trusted Publishing 已配置（无 NPM_TOKEN）
 - **已安装并验证**：本机 web profile 经 `dsh plugin add` 登记 bundle；重启 `dsh web` 后运行态验证通过（余额、会话消耗、顶栏徽章/设置卡片可见）
 - **0.1.4 已发布**（CI + provenance，workflow run 成功）：暂停自动查询（只认 user/assistant 事件、空读不推进 seq、恢复判定改为观察增量）；设置页界面语言切换（`auto` 跟随主界面 / `zh-CN` / `en`，命令 `language <auto|zh-CN|en>`）；客户端中英文案；tarball 补 `image/`（README 截图）
-- **待办**：awesome-dsh-plugin 收录 PR 已提交（[#294](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/294)，UI Enhancements，EN+ZH 各一行），待合并；合并后再补 README 徽章（awesome-dsh-plugin.com badge）
+- **本次改动（未发布）**：自动刷新手动开关（`autoRefresh` 设置项，设置页开关或命令 `auto-refresh <on|off>`，关闭后不再查询）；刷新间隔支持自定义（设置页「自定义…」输入行，5000–600000 校验）；README 截图更新（EN 3 张 / zh 2 张）
+- **待办**：awesome-dsh-plugin 收录 PR 已提交（[#294](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/294)，UI Enhancements，EN+ZH 各一行），待合并；合并后再补 README 徽章（awesome-dsh-plugin.com badge）；清理 `src/client/index.ts` 中被注释掉的重复 `custom-interval` 代码块
 
 ## 验证清单
 

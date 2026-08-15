@@ -3,3 +3,4 @@ lib/
 *.tsbuildinfo
 *.tgz
 .DS_Store
+.dsh-vision-toolkit/

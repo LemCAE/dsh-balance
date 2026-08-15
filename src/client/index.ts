@@ -65,6 +65,7 @@ interface ResultPayload {
   idle?: unknown
   nextRefreshMs?: unknown
     language?: unknown
+    autoRefresh?: unknown
 }
 
 type ChipView =
@@ -141,6 +142,13 @@ const COPY: Record<Lang, Record<string, string>> = {
     sessionNoData: '会话消耗：暂无会话数据',
     modelUnknown: '未知模型',
     modelDefault: '默认（未列出的模型按此计价）',
+      autoRefresh: '自动刷新',
+      autoRefreshOn: '开启',
+      autoRefreshOff: '关闭',
+      autoRefreshDisabledTip: '自动刷新已关闭',
+      customInterval: '自定义间隔（毫秒，5000–600000）',
+      customIntervalApply: '应用',
+      customOption: '自定义…',
   },
   en: {
     settingsTitle: 'DeepSeek Balance',
@@ -182,6 +190,13 @@ const COPY: Record<Lang, Record<string, string>> = {
     sessionNoData: 'Session spend: no session data',
     modelUnknown: 'Unknown model',
     modelDefault: 'Default (unknown models use this)',
+      autoRefresh: 'Auto-refresh',
+      autoRefreshOn: 'On',
+      autoRefreshOff: 'Off',
+      autoRefreshDisabledTip: 'Auto-refresh off',
+      customInterval: 'Custom interval (ms, 5000–600000)',
+      customIntervalApply: 'Apply',
+      customOption: 'Custom…',
   },
 }
 
@@ -279,6 +294,8 @@ export function apply(ctx: ClientContext): void {
     const [nextMs, setNextMs] = React.useState(30000)
     const [tip, setTip] = React.useState<{ left: number; right: number; top: number; bottom: number } | null>(null)
       const [lang, setLang] = React.useState<Lang>(resolveLang(undefined))
+      const [autoRefresh, setAutoRefresh] = React.useState(true)
+      const autoRefreshRef = React.useRef(true)
       const L = (key: keyof typeof COPY.zh) => t(lang, key)
     const anchorRef = React.useRef<HTMLButtonElement | null>(null)
     const bubbleRef = React.useRef<HTMLSpanElement | null>(null)
@@ -291,6 +308,7 @@ export function apply(ctx: ClientContext): void {
       let inFlight = false
       const tick = async () => {
         if (inFlight || disposed) return
+          if (!autoRefreshRef.current) return
         inFlight = true
         try {
           const payload = await runCommand(sessionId, '/dsh-balance refresh')
@@ -302,12 +320,15 @@ export function apply(ctx: ClientContext): void {
             setNextMs(payload.nextRefreshMs)
           }
             if (typeof payload.language === 'string') setLang(resolveLang(payload.language))
+            setAutoRefresh(payload.autoRefresh !== false)
+              autoRefreshRef.current = payload.autoRefresh !== false
           setView({ kind: 'data', result: payload })
         } finally {
           inFlight = false
         }
       }
       void tick()
+        
       const timer = setInterval(() => { void tick() }, nextMs)
       return () => { disposed = true; clearInterval(timer) }
     }, [sessionId, intervalMs, nextMs])
@@ -400,8 +421,10 @@ export function apply(ctx: ClientContext): void {
         } else if (consumption === null) {
           lines.push(L('sessionNoData'))
         }
-        lines.push(`${L('updatedAt')} ${formatTime(result.fetchedAt)} · ${result.idle === true
-          ? L('pausedTip')
+        lines.push(`${L('updatedAt')} ${formatTime(result.fetchedAt)} · ${!autoRefresh
+          ? L('autoRefreshDisabledTip')
+            : result.idle === true
+              ? L('pausedTip')
           : `${L('activeRefresh')} ${Math.round(intervalMs / 1000)} ${L('seconds')}`} · ${L('clickRefresh')}`)
         lines.push(L('estimateNote'))
         return lines.join('\n')
@@ -484,6 +507,9 @@ export function apply(ctx: ClientContext): void {
     const [prices, setPrices] = React.useState<PriceTable | null>(null)
       const [lang, setLang] = React.useState<Lang>(resolveLang(undefined))
       const L = (key: keyof typeof COPY.zh) => t(lang, key)
+      const [autoRefresh, setAutoRefresh] = React.useState(true)
+      const autoRefreshRef = React.useRef(true)
+      const [customInterval, setCustomInterval] = React.useState('')
 
     // 命令驱动 + 自调度（与顶栏徽章同模式）；commands.execute 需要真实会话 ID。
     const applyPayload = (payload: ResultPayload): void => {
@@ -492,6 +518,8 @@ export function apply(ctx: ClientContext): void {
         setNextMs(payload.nextRefreshMs)
       }
       const nextPrices = payload.prices
+          setAutoRefresh(payload.autoRefresh !== false)
+          autoRefreshRef.current = payload.autoRefresh !== false
       if (isPriceTable(nextPrices)) setPrices(prev => (prev ?? nextPrices) as PriceTable | null)
         if (typeof payload.language === 'string') setLang(resolveLang(payload.language))
       setView({ kind: 'data', result: payload })
@@ -502,6 +530,7 @@ export function apply(ctx: ClientContext): void {
       let inFlight = false
       const tick = async () => {
         if (inFlight || disposed) return
+          if (!autoRefreshRef.current) return
         inFlight = true
         try {
           const payload = await runCommand(sessionId, '/dsh-balance refresh')
@@ -550,6 +579,12 @@ export function apply(ctx: ClientContext): void {
         if (payload !== null) applyPayload(payload)
       })
     }
+      const applyAutoRefresh = (enabled: boolean) => {
+        if (sessionId === undefined) return
+        void runCommand(sessionId, `/dsh-balance auto-refresh ${enabled ? 'on' : 'off'}`).then((payload) => {
+          if (payload !== null) applyPayload(payload)
+        })
+      }
     const applyPrices = () => {
       if (sessionId === undefined || prices === null) return
       void runCommand(sessionId, `/dsh-balance prices ${JSON.stringify(prices)}`).then((payload) => {
@@ -626,15 +661,81 @@ export function apply(ctx: ClientContext): void {
         }, L('refresh')),
       ))
       if (withSettings) {
+          elements.push(React.createElement('div', { className: styles.setrow, key: 'auto-refresh' },
+            React.createElement('span', null, L('autoRefresh')),
+            React.createElement('select', {
+              className: styles.select,
+              value: autoRefresh ? 'on' : 'off',
+              onChange: (event: React.ChangeEvent<HTMLSelectElement>) => { applyAutoRefresh(event.target.value === 'on') },
+            },
+              React.createElement('option', { value: 'on' }, L('autoRefreshOn')),
+              React.createElement('option', { value: 'off' }, L('autoRefreshOff')),
+            ),
+          ))
         elements.push(React.createElement('div', { className: styles.setrow, key: 'interval' },
           React.createElement('span', null, L('autoRefreshInterval')),
           React.createElement('select', {
             className: styles.select,
-            value: String(intervalMs),
-            onChange: (event: React.ChangeEvent<HTMLSelectElement>) => { applyInterval(Number(event.target.value)) },
+            value: INTERVAL_OPTIONS.some(option => option.ms === intervalMs) ? String(intervalMs) : 'custom',
+            onChange: (event: React.ChangeEvent<HTMLSelectElement>) => {
+                const value = event.target.value
+                if (value === 'custom') {
+                  setCustomInterval(String(intervalMs))
+                } else {
+                  applyInterval(Number(value))
+                }
+              },
           }, INTERVAL_OPTIONS.map(option =>
-            React.createElement('option', { key: String(option.ms), value: String(option.ms) }, intervalLabel(lang, option.ms)))),
+            React.createElement('option', { key: String(option.ms), value: String(option.ms) }, intervalLabel(lang, option.ms))),
+              React.createElement('option', { value: 'custom' }, L('customOption')),
+            ),
+          ))
+          /*
+          elements.push(React.createElement('div', { className: styles.setrow, key: 'custom-interval' },
+          elements.push(React.createElement('div', { className: styles.setrow, key: 'custom-interval' },
+            React.createElement('span', null, L('customInterval')),
+            React.createElement('input', {
+              className: styles.priceInput,
+              type: 'number',
+              step: '1000',
+              min: '5000',
+              max: '600000',
+              value: customInterval,
+              placeholder: '5000–600000',
+              onChange: (event: React.ChangeEvent<HTMLInputElement>) => { setCustomInterval(event.target.value) },
+            }),
+            React.createElement('button', {
+              className: styles.btn,
+              type: 'button',
+              onClick: () => {
+                const ms = Number(customInterval)
+                if (Number.isFinite(ms) && ms >= 5000 && ms <= 600000) applyInterval(ms)
+              },
+            }, L('customIntervalApply')),
+          ))
         ))
+          */
+          elements.push(React.createElement('div', { className: styles.setrow, key: 'custom-interval' },
+            React.createElement('span', null, L('customInterval')),
+            React.createElement('input', {
+              className: styles.priceInput,
+              type: 'number',
+              step: '1000',
+              min: '5000',
+              max: '600000',
+              value: customInterval,
+              placeholder: '5000–600000',
+              onChange: (event: React.ChangeEvent<HTMLInputElement>) => { setCustomInterval(event.target.value) },
+            }),
+            React.createElement('button', {
+              className: styles.btn,
+              type: 'button',
+              onClick: () => {
+                const ms = Number(customInterval)
+                if (Number.isFinite(ms) && ms >= 5000 && ms <= 600000) applyInterval(ms)
+              },
+            }, L('customIntervalApply')),
+          ))
           elements.push(React.createElement('div', { className: styles.setrow, key: 'language' },
             React.createElement('span', null, L('language')),
             React.createElement('select', {
