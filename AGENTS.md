@@ -51,11 +51,11 @@ pnpm build              # tsc -b + tsdown（lib/index.js + lib/client.js + lib/i
 
 ## 当前状态与待办（2026-08-15）
 
-- **已发布**：npm 0.1.0（手动首发）/ 0.1.2 / 0.1.3 / 0.1.4 / 0.1.5（CI + provenance）；GitHub Release v0.1.2、v0.1.3、v0.1.4、v0.1.5；Trusted Publishing 已配置（无 NPM_TOKEN）
+- **已发布**：npm 0.1.0（手动首发）/ 0.1.2 / 0.1.3 / 0.1.4 / 0.1.5 / 0.1.6（CI + provenance）；GitHub Release v0.1.2、v0.1.3、v0.1.4、v0.1.5、v0.1.6；Trusted Publishing 已配置（无 NPM_TOKEN）
 - **已安装并验证**：本机 web profile 经 `dsh plugin add` 登记 bundle；重启 `dsh web` 后运行态验证通过（余额、会话消耗、顶栏徽章/设置卡片可见）
 - **0.1.4 已发布**（CI + provenance，workflow run 成功）：暂停自动查询（只认 user/assistant 事件、空读不推进 seq、恢复判定改为观察增量）；设置页界面语言切换（`auto` 跟随主界面 / `zh-CN` / `en`，命令 `language <auto|zh-CN|en>`）；客户端中英文案；tarball 补 `image/`（README 截图）
 - **0.1.5 已发布**（CI + provenance，workflow run 成功）：自动刷新手动开关（`autoRefresh` 设置项，设置页开关或命令 `auto-refresh <on|off>`，关闭后不再查询）；刷新间隔支持自定义（设置页「自定义…」输入行，5000–600000 校验）；README 截图更新（EN 3 张 / zh 3 张）
-- **本次改动（未发布）**：移除旧固定价与 `switchover` 切换点——价目表简化为 `{ offPeak, peak }` 两档（按北京小时判峰谷，高峰 9-12 / 14-18）；设置页价格网格 4 列改 3 列，文案 `switchoverHint` → `peakHoursHint`；awesome-dsh-plugin 收录 PR [#294](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/294) 已合并，README 补徽章并更新截图
+- **0.1.6 已发布**（CI + provenance，workflow run 成功）：移除旧固定价与 `switchover` 切换点——价目表简化为 `{ offPeak, peak }` 两档（按北京小时判峰谷，高峰 9-12 / 14-18）；设置页价格网格 4 列改 3 列，文案 `switchoverHint` → `peakHoursHint`；awesome-dsh-plugin 收录 PR [#294](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/294) 已合并，README 补徽章并更新截图
 - **待办**：清理 `src/client/index.ts` 中被注释掉的重复 `custom-interval` 代码块
 
 ## 验证清单
