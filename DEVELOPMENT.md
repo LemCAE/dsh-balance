@@ -275,6 +275,8 @@ pnpm pack --dry-run                           # 检查 tarball 内容（lib + sr
 | `npm publish` 报无发布权限 | npm 用户名与 scope 不一致或未注册 | scope 必须与 npm 用户名精确一致（如 `@lemcae` ↔ 用户 `lemcae`）；先注册同名用户 |
 | 目录移动后 `pnpm typecheck` 报 `MODULE_NOT_FOUND` | node_modules 的 pnpm 链接指向旧路径，pnpm 误判"已是最新" | 删除 node_modules 后重新 `pnpm install` |
 | 删除旧目录报 exit 32 被占用 | 正在运行的 `dsh web` 进程持有目录句柄 | 先重启 web，再 `cmd /c rd /s /q` |
+| 发布脚本把 package.json 版本写坏（如 `$10.1.7`） | 替换串 `'$1' + 版本号` 中 `$1` 后紧跟数字，被 .NET 正则解析为组 10 反向引用 | 替换串用 `${1}`/`${2}`，写入后 `ConvertFrom-Json` 自校验 `version` 字段（release.ps1 已内置） |
+| CI `Setup pnpm` 报 JSON 解析失败 | package.json 被发布脚本写坏（非预期格式/坏 JSON） | 本地先 `ConvertFrom-Json` 校验 package.json；修复后删远端 tag 重打重推 |
 
 ## 9. 发布要点
 
@@ -313,6 +315,7 @@ GitHub Actions（release.yml，v* tag 触发）：
 | 0.1.4 | CI | 成功：暂停感知自动查询 + 界面语言切换 + 中英文案（本机运行态验证通过后发布） |
 | 0.1.5 | CI | 成功：自动刷新手动开关 + 自定义刷新间隔 + README 截图更新 |
 | 0.1.6 | CI | 成功：移除旧固定价与 switchover，价目表仅峰/谷两档；README 补 awesome 徽章（PR #294 已合并） |
+| 0.1.7 | CI | 成功：主页面隐藏刷新命令行 + 一键发布脚本 `scripts/release.ps1`（首次 CI 失败：脚本版本替换把 package.json 写坏，修复后重打 tag 通过，见 10.3-9） |
 
 ### 10.3 关键坑与决策
 
@@ -345,3 +348,8 @@ GitHub Actions（release.yml，v* tag 触发）：
    `node_modules/@deepseek-ai/dsh-balance` 死链不影响 dsh 启动（启动链只读 `$DSH_HOME/profiles/web`），
    但建议 `git checkout -- pnpm-lock.yaml` + 删除死链保持主库干净；被运行中 web 进程占用的目录
    需重启后删除。
+9. **发布脚本版本替换的 `$1` 陷阱**：`-replace` 替换串若写成 `'$1' + $target`，当 `$target` 以数字开头
+   （如 `0.1.7`）时 `$10` 会被当成「第 10 组反向引用」，把 package.json 版本行写坏（0.1.7 首发 CI
+   因此在 `Setup pnpm` 解析 package.json 时失败）。修复：替换串用 `${1}`/`${2}`，并写入后
+   `ConvertFrom-Json` 自校验。若坏版本已推 tag：删远端 tag（`git push origin :refs/tags/vX.Y.Z`）→
+   修复提交 → 重打 tag 重推（tag push 会重新触发 release.yml）。
