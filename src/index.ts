@@ -515,7 +515,9 @@ export function apply(ctx: Context): void {
     name: 'dsh-balance',
     description: '查询 DeepSeek 开放平台余额与当前会话消耗；或设置自动刷新开关/间隔、界面语言与价目表。',
     input: { hint: 'refresh | interval <毫秒> | prices <JSON> | language <auto|zh-CN|en> | auto-refresh <on|off>' },
-    recordInput: true,
+    // 自动刷新与手动点击都经本命令执行；recordInput: false 使 command/run 事件
+    // 不再携带输入行（生命周期事件仍写入会话日志，但不再重复记录输入内容）。
+    recordInput: false,
     handler: async (invocation) => {
       const sessionId = String(invocation.agent.session.id)
       const raw = (invocation.rawInput ?? '').trim()

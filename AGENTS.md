@@ -56,11 +56,12 @@ pnpm build              # tsc -b + tsdown（lib/index.js + lib/client.js + lib/i
 - **0.1.4 已发布**（CI + provenance，workflow run 成功）：暂停自动查询（只认 user/assistant 事件、空读不推进 seq、恢复判定改为观察增量）；设置页界面语言切换（`auto` 跟随主界面 / `zh-CN` / `en`，命令 `language <auto|zh-CN|en>`）；客户端中英文案；tarball 补 `image/`（README 截图）
 - **0.1.5 已发布**（CI + provenance，workflow run 成功）：自动刷新手动开关（`autoRefresh` 设置项，设置页开关或命令 `auto-refresh <on|off>`，关闭后不再查询）；刷新间隔支持自定义（设置页「自定义…」输入行，5000–600000 校验）；README 截图更新（EN 3 张 / zh 3 张）
 - **0.1.6 已发布**（CI + provenance，workflow run 成功）：移除旧固定价与 `switchover` 切换点——价目表简化为 `{ offPeak, peak }` 两档（按北京小时判峰谷，高峰 9-12 / 14-18）；设置页价格网格 4 列改 3 列，文案 `switchoverHint` → `peakHoursHint`；awesome-dsh-plugin 收录 PR [#294](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/294) 已合并，README 补徽章并更新截图
-- **待办**：清理 `src/client/index.ts` 中被注释掉的重复 `custom-interval` 代码块
+- **主页面不再显示刷新命令行**（工作区已改、未发版）：`recordInput: false` + 客户端注册 `conversation.chat.commandview` keyed 渲染器并用 CSS（`:has`）隐藏 `dsh-balance` 命令卡片行——刷新不再污染主聊天页；日志事件仍写入（详见 DEVELOPMENT.md §5）
 
 ## 验证清单
 
 - `pnpm typecheck && pnpm build`；`pnpm pack --dry-run` 检查 tarball（lib + src + cordis.patch.yml + README）
+- 一键发布：`pnpm release`（scripts/release.ps1，见 DEVELOPMENT.md §2.1 模式 B）——typecheck/build → bump → commit → tag → push → 等 CI → 核验 npm + Release；`-DryRun` 预览 / `-CommitAll` 含未提交改动 / `-NoPush` 只本地；参数直接跟在命令后（无需 `--`）；发布记录手动补
 - 发布：推 `vX.Y.Z` tag → workflow 校验版本、构建、`pnpm publish --tag latest --provenance`、GitHub Release（**Trusted Publishing/OIDC，无需 NPM_TOKEN**；仓库 `repository.url` 必须精确等于 `https://github.com/LemCAE/dsh-balance` 才能通过 sigstore 校验）
 - 生态：仓库已打 `dsh-plugin` topic；awesome-dsh-plugin 收录待功能稳定后再提交（README.md + README.zh.md 同步）
 - 运行态：顶栏徽章（余额 | 会话 ≈x）、悬停气泡（按钮下方居中）、设置 → DeepSeek 余额（含界面语言切换，auto 跟随主界面）；`Tool.listTools` 含 `deepseek_balance`，调用返回余额 + 消耗 + `nextRefreshMs` + `language`；暂停后普通键鼠不触发查询，发送新消息后在下一次低频探测时恢复

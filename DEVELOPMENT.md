@@ -82,6 +82,24 @@ git push origin main && git push origin v0.1.x    # CI 自动发布到 npm（Tru
 pnpm dsh plugin --profile web update @lemcae/dsh-balance   # 宿主更新到最新版
 ```
 
+**一键发布脚本**（把 §10.1 流水线固化为一条命令，推荐）：
+
+```powershell
+pnpm release                    # typecheck → build → bump → commit → tag v0.1.x → push main+tag
+                                #   → 等待 CI → 核验 npm latest/provenance + GitHub Release
+pnpm release -CommitAll         # 工作区有未提交改动时一并提交（否则默认中止）
+pnpm release -Version 0.2.0     # 指定目标版本
+pnpm release -NoPush            # 只做本地（typecheck/build/bump/commit/tag），不推送
+pnpm release -NoVerify          # 推送后跳过 CI 等待与核验
+pnpm release -DryRun            # 只打印执行计划，不产生任何修改
+```
+
+参数直接跟在 `pnpm release` 后即可（pnpm 原样透传给脚本，不需要 `--`）；
+等价形式：`.\scripts\release.ps1 -DryRun`（或 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\release.ps1 -DryRun`）。
+
+脚本不代写发布记录（AGENTS.md「已发布」/ DEVELOPMENT.md §10.2 手动补）；
+git 推送走本机凭据，npm 发布由 CI 的 Trusted Publishing（OIDC）完成，无需本地登录。
+
 发版前**必须切回 npm 版**（`dsh plugin update` 会覆盖本地 junction）：
 
 ```powershell
@@ -168,6 +186,7 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
 ### 4.5 命令与工具
 
 - 命令 `dsh-balance`（`ctx.commands.register`）：`refresh` / `interval <ms>` / `prices <json>` / `language <auto|zh-CN|en>` / `auto-refresh <on|off>`；成功时 `text` 回传完整 payload JSON（客户端解析）。
+- 命令定义 `recordInput: false`：`command/run` 事件不再携带输入行（生命周期事件仍写入日志，但不再重复记录输入内容）。
 - 工具 `deepseek_balance`（`ctx.tools.register(defineTool(...))`）：余额 + 调用方会话（`exec.agent.session.id`）消耗，返回同一 payload 形状。
 
 ### 4.6 Payload 形状
@@ -203,6 +222,7 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
 - `runCommand`：接受 `string | undefined`（内部 `?? ''` 兜底）→ `commands.execute` → 解 `{ok,value}` 信封 → `value.result.text` JSON.parse；失败返回 null（静默降级）。
 - **界面语言**：`resolveLang(payload.language)` 解析当前语言；`auto` 时读取 `document.documentElement.lang || navigator.language`（`/^zh/i` 用中文，否则英文）。文案字典 `COPY` / `t()` 驱动中英切换。
 - 无 `$on`/事件订阅；无 `styles.insert`（CSS Module）。
+- **主聊天页不显示刷新命令行**：每次刷新都会经 `commands.execute` 在会话日志追加 `command/run` + `command/done`，主聊天页会渲染成一行命令卡片（标题 `dsh-balance` + 完整 payload JSON）。客户端注册 `conversation.chat.commandview` 的 keyed 渲染器（key = `dsh-balance`），把该命令的行替换为空标记元素，并注入一条 CSS（`[data-chat-flow-kind="command"]:has([data-dsh-balance-command-row]){display:none}`）把整个 flow item 隐藏——不留记录行也不留空 flex 间隙。副作用：用户手动敲 `/dsh-balance …` 的行同样被隐藏（结果仍可见于徽章/设置卡片/工具返回）。
 
 ## 6. 部署接线（安装方式）
 
@@ -261,7 +281,7 @@ pnpm pack --dry-run                           # 检查 tarball 内容（lib + sr
 - **发布开关 = 推送 `vX.Y.Z` tag**：`.github/workflows/release.yml` 校验 tag == `package.json` 版本（`scripts/verify-version.mjs`）→ typecheck → build → `pnpm publish --access public --tag latest` → `gh release create`。**认证走 npm Trusted Publishing（OIDC，`id-token: write`）**，无需 NPM_TOKEN secret；一次性前置：npm 注册用户 `lemcae` → 本机手动首发 `0.1.0`（`npm login` + `pnpm publish`）→ npm 包设置页把 `LemCAE/dsh-balance`（workflow `release.yml`）添加为可信发布者。
 - peer 依赖由消费者（dsh 宿主）自行提供（`@deepseek-ai/*` 系列 + `react`）；peer 范围写真实版本（`^0.1.0-rc.5`，兼容 rc.5 与 rc.6 宿主），不写 `workspace:`。
 - 生态收录：仓库打 `dsh-plugin` topic；向 awesome-dsh-plugin 提交一行条目（README.md + README.zh.md 同步），其站点每日生成 plugins.json 供 dsh-market 白名单使用。
-- 已知代价：每次自动刷新都会写入 `command/run` + `command/done` 两条会话日志事件（暂停自动查询后大幅减少）。
+- 已知代价：每次自动刷新仍会写入 `command/run` + `command/done` 两条会话日志事件（`recordInput: false` 后 run 不带输入行；客户端已把对应命令卡片行从主聊天页隐藏，暂停自动查询后事件进一步减少）。
 
 ## 10. 发布实战记录（2026-08-14 首次发布）
 
@@ -272,8 +292,8 @@ pnpm pack --dry-run                           # 检查 tarball 内容（lib + sr
 
 ```
 本地：改代码 → git commit → git push origin main
-      → pnpm version patch（0.1.x → 0.1.x+1，自动 commit + 打 tag v0.1.x）
-      → git push origin main && git push origin v0.1.x
+      → pnpm release（一键：typecheck/build → bump → commit → tag → push → 等 CI → 核验）
+        （或手动：pnpm version patch → git push origin main && git push origin v0.1.x）
 GitHub Actions（release.yml，v* tag 触发）：
       actionlint → pnpm install --frozen-lockfile → typecheck → build
       → verify-version.mjs（tag == package.json version）

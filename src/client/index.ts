@@ -685,31 +685,6 @@ export function apply(ctx: ClientContext): void {
               React.createElement('option', { value: 'custom' }, L('customOption')),
             ),
           ))
-          /*
-          elements.push(React.createElement('div', { className: styles.setrow, key: 'custom-interval' },
-          elements.push(React.createElement('div', { className: styles.setrow, key: 'custom-interval' },
-            React.createElement('span', null, L('customInterval')),
-            React.createElement('input', {
-              className: styles.priceInput,
-              type: 'number',
-              step: '1000',
-              min: '5000',
-              max: '600000',
-              value: customInterval,
-              placeholder: '5000–600000',
-              onChange: (event: React.ChangeEvent<HTMLInputElement>) => { setCustomInterval(event.target.value) },
-            }),
-            React.createElement('button', {
-              className: styles.btn,
-              type: 'button',
-              onClick: () => {
-                const ms = Number(customInterval)
-                if (Number.isFinite(ms) && ms >= 5000 && ms <= 600000) applyInterval(ms)
-              },
-            }, L('customIntervalApply')),
-          ))
-        ))
-          */
           elements.push(React.createElement('div', { className: styles.setrow, key: 'custom-interval' },
             React.createElement('span', null, L('customInterval')),
             React.createElement('input', {
@@ -797,6 +772,32 @@ export function apply(ctx: ClientContext): void {
       ),
       renderBody(),
     )
+  }
+
+  // ─── 隐藏主聊天页的 dsh-balance 命令行（刷新不再污染会话记录）──────────
+  // 自动/手动刷新都经 commands.execute 执行，宿主为每次执行向会话日志追加
+  // command/run + command/done 事件，主聊天页据此渲染一行命令卡片（标题
+  // dsh-balance + 完整 payload JSON）。这里注册 keyed commandview 渲染器，
+  // 把该命令的行替换成一个空标记元素，再用 CSS 把整个 flow item 设为
+  // display:none——页面不再产生记录行，也不残留空行高/flex 间隙。事件仍会
+  // 写入日志（host 侧 recordInput: false 后 command/run 不带 args），只是
+  // 不再污染页面。
+  // 副作用：用户在输入框手动敲 /dsh-balance … 产生的行同样被隐藏（结果仍
+  // 可见于顶栏徽章、设置卡片与工具返回）。
+  const COMMAND_HIDE_STAMP = 'data-dsh-balance-command-row'
+  ctx.slots.inject('conversation.chat.commandview', () => ctx.slots.register(
+    { name: 'conversation.chat.commandview', key: 'dsh-balance' },
+    () => {
+      const stamp: Record<string, string> = { [COMMAND_HIDE_STAMP]: 'true' }
+      return React.createElement('div', stamp)
+    },
+  ))
+  if (typeof document !== 'undefined'
+    && document.querySelector('style[data-plugin-css="dsh-balance/command-hide"]') === null) {
+    const tag = document.createElement('style')
+    tag.dataset.pluginCss = 'dsh-balance/command-hide'
+    tag.textContent = `[data-chat-flow-kind="command"]:has([${COMMAND_HIDE_STAMP}]){display:none}`
+    document.head.appendChild(tag)
   }
 
   ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register(

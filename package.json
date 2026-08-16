@@ -1,7 +1,7 @@
 {
   "name": "@lemcae/dsh-balance",
   "description": "DeepSeek Open Platform balance and session consumption readout (host + web client)",
-  "version": "0.1.6",
+  $10.1.7",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
@@ -45,7 +45,8 @@
     "build": "tsc -b && tsdown",
     "typecheck": "tsc -b --pretty false",
     "prepare": "tsdown",
-    "watch": "tsdown --watch"
+    "watch": "tsdown --watch",
+    "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1"
   },
   "dsh": {
     "bundle": {
