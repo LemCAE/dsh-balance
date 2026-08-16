@@ -137,9 +137,13 @@ Write-Ok 'build passed'
 # --- Version write ------------------------------------------------------
 Write-Step "bump version $current -> $target"
 $raw = Get-Content -Raw $PkgPath
-$newRaw = $raw -replace '("version"\s*:\s*")[^"]+(")', ('$1' + $target + '$2')
+# Use ${1}/${2} so the version digits are never parsed as part of a
+# backreference (e.g. '$1' + '0.1.7' would read as group 10).
+$newRaw = $raw -replace '("version"\s*:\s*")[^"]+(")', ('${1}' + $target + '${2}')
 if ($newRaw -eq $raw) { throw 'package.json version replacement failed' }
 [System.IO.File]::WriteAllText($PkgPath, $newRaw, (New-Object System.Text.UTF8Encoding($false)))
+$check = Get-Content -Raw $PkgPath | ConvertFrom-Json
+if ($check.version -ne $target) { throw "package.json version verify failed: got '$($check.version)', expected '$target'" }
 Write-Ok "package.json -> $target"
 
 # --- Commit and tag -----------------------------------------------------
