@@ -185,7 +185,7 @@
 
 .priceGrid {
   display: grid;
-  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  grid-template-columns: 1.5fr 1fr 1fr;
   gap: 4px 8px;
   margin-top: 6px;
   font-size: 12px;

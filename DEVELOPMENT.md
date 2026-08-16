@@ -9,7 +9,7 @@
 `@lemcae/dsh-balance` 是一个 **Host + Web Client 双半组合插件**，作为独立 npm 包发布（`dsh-plugin` 生态），经 `dsh plugin add` 安装：
 
 - **余额**：调用 DeepSeek 官方 `GET https://api.deepseek.com/user/balance`（复用 harness 的 `DEEPSEEK_API_KEY` 凭据）；
-- **当前会话消耗估算**：基于本机会话日志中 provider 上报的 token usage（未命中输入 / 缓存命中 / 输出），按官方价目表（旧固定价 → 峰谷价）逐步骤计价；
+- **当前会话消耗估算**：基于本机会话日志中 provider 上报的 token usage（未命中输入 / 缓存命中 / 输出），按官方价目表（北京时间峰谷价）逐步骤计价；
 - **界面**：会话顶栏余额徽章（含按钮下方悬停气泡）、设置 →「DeepSeek 余额」页（余额、刷新间隔、界面语言、可编辑价目表）；
 - **模型工具**：`deepseek_balance`（余额 + 当前会话消耗）。
 - **暂停自动查询**：连续 2 个刷新周期无新对话（user/assistant 消息）→ 暂停自动查询
@@ -132,7 +132,7 @@ type BalanceSettingsValue = { refreshIntervalMs: number; prices: PriceTable; lan
 - `autoRefresh`：是否启用自动刷新（默认 true，命令 `auto-refresh <on|off>`）。
 - `refreshIntervalMs`：自动刷新间隔（5000–600000 校验，默认 30000）。
 - `language`：插件界面语言，`auto`（默认，跟随宿主主界面语言，由客户端解析）/ `zh-CN` / `en`。
-- `prices`：价目表 `{ switchover: ISO, models: { 'deepseek-v4-flash'|'deepseek-v4-pro'|'default': { old, offPeak, peak } } }`。
+- `prices`：价目表 `{ models: { 'deepseek-v4-flash'|'deepseek-v4-pro'|'default': { offPeak, peak } } }`。
 - 持久化于设置文档，重启不丢；改动经命令 `scope.update` 写入。
 
 ### 4.2 余额拉取（为什么用子进程）
@@ -153,7 +153,7 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
   - `request/header` → 记当前模型（`data.header.config.model`）；
   - `assistant/message` 带 `data.usage`（`TokenUsage`：`inputTokens`=未命中、`cacheReadTokens`=命中、`outputTokens`）→ 按 `(turn,step)` **last-wins**（同一步重复采样先撤旧再计新，与 harness `tokenUsage` 投影同语义）；
   - 每步按其事件时间 + 当时模型计价：`cost += uncached/1e6×input + cacheRead/1e6×cacheHit + output/1e6×output`。
-- 计价表：`switchover = '2026-08-16T16:00:00Z'`（= 2026-08-17 00:00 北京时间）前用 `old`；之后按**北京时间**小时判峰谷（9-12、14-18 为高峰），高峰用 `peak`、其余 `offPeak`。默认价目表由用户提供（v4-flash / v4-pro / default 回退）。
+- 计价表：按**北京时间**小时判峰谷（9-12、14-18 为高峰），高峰用 `peak`、其余 `offPeak`。默认价目表由用户提供（v4-flash / v4-pro / default 回退）。
 - 已知限制：会话被 compaction 重写 seq 后，增量状态可能停在旧值（估算场景可接受，未处理）。
 
 ### 4.4 暂停自动查询
@@ -179,7 +179,7 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
   "sessionId": "…",
   "fetchedAt": "ISO",
   "intervalMs": 30000,
-  "prices": { "switchover": "…", "models": { … } },
+  "prices": { "models": { … } },
   "language": "auto",
   "autoRefresh": true,
   "consumption": { "cost": 5.59, "uncachedInput": 3100763, "cacheRead": 90815744, "output": 334476, "model": "deepseek-v4-flash", "currency": "CNY", "estimated": true } | null,
@@ -198,7 +198,7 @@ Host 沙箱无 `fetch`/`require`；`web.fetch` 只带 URL 不能带 `Authorizati
   - 自动刷新关闭时气泡状态行显示「自动刷新已关闭」（`autoRefreshDisabledTip`）。
 - **设置页卡片**（`settings.section`，`id: 'dsh-balance'`）：
   - 渲染器经标准 props `useSessions(state => state.current)` 取当前会话 ID（命令需要真实 ID，`''` 无效）；无会话时显示提示；
-  - 余额行 + 自动刷新开关（on/off，经 `auto-refresh` 命令持久化）+ 刷新间隔下拉（预设 15s–5min，非预设值显示「自定义…」）+ 自定义间隔输入行（数字 5000–600000，校验后「应用」）+ 界面语言下拉（`auto` 跟随主界面 / `zh-CN` / `en`，经 `language` 命令持久化）+ 价目表网格（4 列：行标签/旧价/空闲/高峰，模型分块子标题）；
+  - 余额行 + 自动刷新开关（on/off，经 `auto-refresh` 命令持久化）+ 刷新间隔下拉（预设 15s–5min，非预设值显示「自定义…」）+ 自定义间隔输入行（数字 5000–600000，校验后「应用」）+ 界面语言下拉（`auto` 跟随主界面 / `zh-CN` / `en`，经 `language` 命令持久化）+ 价目表网格（3 列：行标签/空闲/高峰，模型分块子标题）；
   - 价格编辑为草稿态，点「保存」走 `prices` 命令持久化。
 - `runCommand`：接受 `string | undefined`（内部 `?? ''` 兜底）→ `commands.execute` → 解 `{ok,value}` 信封 → `value.result.text` JSON.parse；失败返回 null（静默降级）。
 - **界面语言**：`resolveLang(payload.language)` 解析当前语言；`auto` 时读取 `document.documentElement.lang || navigator.language`（`/^zh/i` 用中文，否则英文）。文案字典 `COPY` / `t()` 驱动中英切换。

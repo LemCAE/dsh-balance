@@ -5,8 +5,8 @@
  * the official balance endpoint through a bounded node subprocess (the API key
  * travels only over the child's stdin), estimates the current session's spend
  * from durable per-step provider usage (uncached input / cache reads / output)
- * against the official price table (old fixed table until 2026-08-16 23:59
- * Beijing time, then the peak/off-peak table). The page pulls everything on
+ * against the official peak/off-peak price table (peak hours 9-12 and 14-18
+ * Beijing time). The page pulls everything on
  * demand over the built-in commands Remote namespace:
  *
  *   client ctx.remote.commands.execute(sessionId, '/dsh-balance refresh')
@@ -38,8 +38,6 @@ export type RateSet = {
 }
 
 export type ModelPrices = {
-  /** 旧价目表（2026-08-17 前生效的固定价格）。 */
-  old: RateSet
   /** 新价目表·空闲时段。 */
   offPeak: RateSet
   /** 新价目表·高峰时段。 */
@@ -47,8 +45,6 @@ export type ModelPrices = {
 }
 
 export type PriceTable = {
-  /** 新旧价目切换时刻（ISO 8601）。2026-08-17 00:00 北京时间 = 2026-08-16T16:00:00Z。 */
-  switchover: string
   models: Record<string, ModelPrices>
 }
 
@@ -75,25 +71,18 @@ export type ConsumptionInfo = {
 
 const RATE = (input: number, cacheHit: number, output: number): RateSet => ({ input, cacheHit, output })
 
-/** 新旧价目切换点：2026-08-17 00:00 北京时间。 */
-export const DEFAULT_SWITCHOVER = '2026-08-16T16:00:00Z'
-
 export const DEFAULT_PRICE_TABLE: PriceTable = {
-  switchover: DEFAULT_SWITCHOVER,
   models: {
     'deepseek-v4-flash': {
-      old: RATE(1, 0.02, 2),
       offPeak: RATE(1.5, 0.05, 4.5),
       peak: RATE(3, 0.1, 9),
     },
     'deepseek-v4-pro': {
-      old: RATE(3, 0.025, 6),
       offPeak: RATE(4.5, 0.15, 13.5),
       peak: RATE(9, 0.3, 27),
     },
     // 未在表中列出的模型按 v4-flash 估算。
     'default': {
-      old: RATE(1, 0.02, 2),
       offPeak: RATE(1.5, 0.05, 4.5),
       peak: RATE(3, 0.1, 9),
     },
@@ -106,12 +95,10 @@ const RateSetSchema = z.object({
   output: z.number().default(0),
 })
 const ModelPricesSchema = z.object({
-  old: RateSetSchema,
   offPeak: RateSetSchema,
   peak: RateSetSchema,
 })
 const PriceTableSchema = z.object({
-  switchover: z.string().default(DEFAULT_SWITCHOVER),
   models: z.object({
     'deepseek-v4-flash': ModelPricesSchema,
     'deepseek-v4-pro': ModelPricesSchema,
@@ -172,13 +159,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** 结构校验一次价格表更新（沿用默认表形状 + 数值非负）。 */
 function isPriceTable(value: unknown): value is PriceTable {
-  if (!isRecord(value) || typeof value.switchover !== 'string') return false
+  if (!isRecord(value)) return false
   const models = value.models
   if (!isRecord(models)) return false
   for (const key of ['deepseek-v4-flash', 'deepseek-v4-pro', 'default']) {
     const entry = models[key]
     if (!isRecord(entry)) return false
-    for (const phase of ['old', 'offPeak', 'peak'] as const) {
+    for (const phase of ['offPeak', 'peak'] as const) {
       const rates = entry[phase]
       if (!isRecord(rates)) return false
       for (const field of ['input', 'cacheHit', 'output'] as const) {
@@ -195,14 +182,13 @@ function beijingHour(when: Date): number {
   return new Date(when.getTime() + 8 * 3600 * 1000).getUTCHours()
 }
 
-/** 按请求时间选出适用的单价：旧表（切换点前）或新表峰/谷。 */
+/** 按请求时间的北京小时选出适用的单价：高峰用 peak，其余用 offPeak。 */
 function priceFor(table: PriceTable, model: string | undefined, when: Date): RateSet {
   const entry = model !== undefined && isRecord(table.models) && isRecord(table.models[model])
     ? table.models[model] as ModelPrices
     : isRecord(table.models) && isRecord(table.models['default'])
       ? table.models['default'] as ModelPrices
       : DEFAULT_PRICE_TABLE.models['default'] as ModelPrices
-  if (when.getTime() < new Date(table.switchover).getTime()) return entry.old
   const hour = beijingHour(when)
   const peak = (hour >= 9 && hour < 12) || (hour >= 14 && hour < 18)
   return peak ? entry.peak : entry.offPeak
@@ -556,7 +542,7 @@ export function apply(ctx: Context): void {
           return { kind: 'error', text: '价目表 JSON 解析失败' }
         }
         if (!isPriceTable(parsed)) {
-          return { kind: 'error', text: '价目表结构无效（需含 switchover 与三个模型的 old/offPeak/peak 单价）' }
+          return { kind: 'error', text: '价目表结构无效（需含三个模型的 offPeak/peak 单价）' }
         }
         await scope.update({ prices: parsed })
         const payload = await buildPayload(sessionId)

@@ -1,7 +1,7 @@
 {
   "name": "@lemcae/dsh-balance",
   "description": "DeepSeek Open Platform balance and session consumption readout (host + web client)",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.7.0",

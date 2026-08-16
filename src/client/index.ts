@@ -33,13 +33,11 @@ interface RateSet {
 }
 
 interface ModelPrices {
-  old: RateSet
   offPeak: RateSet
   peak: RateSet
 }
 
 interface PriceTable {
-  switchover: string
   models: Record<string, ModelPrices>
 }
 
@@ -85,7 +83,7 @@ const INTERVAL_OPTIONS = [
 ]
 
 const PRICE_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro', 'default'] as const
-const PRICE_PHASES = ['old', 'offPeak', 'peak'] as const
+const PRICE_PHASES = ['offPeak', 'peak'] as const
 const PRICE_FIELDS = ['input', 'cacheHit', 'output'] as const
 
 
@@ -120,14 +118,13 @@ const COPY: Record<Lang, Record<string, string>> = {
     languageEn: 'English',
     priceTable: '价格表（元 / 百万 tokens）',
     save: '保存',
-    oldPrice: '旧价',
     offPeakPrice: '空闲时段',
     peakPrice: '高峰时段',
     inputLabel: '输入(未命中)',
     cacheHitLabel: '缓存命中',
     outputLabel: '输出',
     defaultModelLabel: '默认（未列出的模型按此计价）',
-    switchoverHint: '08-17 00:00（北京时间）起使用「空闲/高峰」价；高峰时段 9-12、14-18。估算仅供参考，以官方账单为准。',
+    peakHoursHint: '高峰时段 9-12、14-18（北京时间），其余时段按「空闲」价。估算仅供参考，以官方账单为准。',
     pausedTip: '已暂停自动查询：连续 2 个周期无新对话，出现新对话后自动恢复',
     activeRefresh: '自动刷新每',
     seconds: '秒',
@@ -168,14 +165,13 @@ const COPY: Record<Lang, Record<string, string>> = {
     languageEn: 'English',
     priceTable: 'Price table (CNY / 1M tokens)',
     save: 'Save',
-    oldPrice: 'Old',
     offPeakPrice: 'Off-peak',
     peakPrice: 'Peak',
     inputLabel: 'Input (uncached)',
     cacheHitLabel: 'Cache hit',
     outputLabel: 'Output',
     defaultModelLabel: 'Default (unknown models use this)',
-    switchoverHint: 'From 08-17 00:00 (Beijing time) the off-peak/peak prices apply; peak hours 9-12, 14-18. Estimate only — the official bill is authoritative.',
+    peakHoursHint: 'Peak hours 9-12, 14-18 (Beijing time); other hours use off-peak. Estimate only — the official bill is authoritative.',
     pausedTip: 'Auto-refresh paused: no new conversation for 2 cycles; resumes when a new message appears',
     activeRefresh: 'Auto-refresh every',
     seconds: 's',
@@ -225,7 +221,7 @@ function symbolOf(currency: unknown): string {
 }
 
 function formatCost(cost: number): string {
-  return cost >= 0.005 ? `¥${cost.toFixed(2)}` : '<¥0.01'
+ return cost >= 0.005 ? `¥${cost.toFixed(2)}` : '<¥0.01'
 }
 
 function formatExact(cost: number): string {
@@ -246,8 +242,7 @@ function formatNum(value: number): string {
 }
 
 function isPriceTable(value: unknown): value is PriceTable {
-  if (!isRecord(value) || typeof value.switchover !== 'string') return false
-  if (!isRecord(value.models)) return false
+  if (!isRecord(value) || !isRecord(value.models)) return false
   for (const key of PRICE_MODELS) {
     const entry = value.models[key]
     if (!isRecord(entry)) return false
@@ -756,9 +751,8 @@ export function apply(ctx: ClientContext): void {
         ))
         const grid: React.ReactNode[] = [
           React.createElement('div', { key: 'ph0' }, ''),
-          React.createElement('div', { className: styles.muted, key: 'ph1' }, L('oldPrice')),
-          React.createElement('div', { className: styles.muted, key: 'ph2' }, L('offPeakPrice')),
-          React.createElement('div', { className: styles.muted, key: 'ph3' }, L('peakPrice')),
+          React.createElement('div', { className: styles.muted, key: 'ph1' }, L('offPeakPrice')),
+          React.createElement('div', { className: styles.muted, key: 'ph2' }, L('peakPrice')),
         ]
         for (const model of PRICE_MODELS) {
           const entry = prices.models[model]
@@ -786,8 +780,8 @@ export function apply(ctx: ClientContext): void {
           }
         }
         elements.push(React.createElement('div', { className: styles.priceGrid, key: 'price-grid' }, grid))
-        elements.push(React.createElement('div', { className: styles.muted, key: 'switchover' },
-          L('switchoverHint')))
+        elements.push(React.createElement('div', { className: styles.muted, key: 'peak-hours' },
+          L('peakHoursHint')))
       }
       return React.createElement('div', null, ...elements)
     }
